@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Creates .env from .env.example with freshly generated secrets. Never overwrites an existing .env.
-# Needs openssl, or Docker as a fallback (so a machine with only Docker works).
+# Needs openssl, Node.js or Docker (whichever is found first), so it works with or without Docker.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -9,9 +9,17 @@ if [ -f .env ]; then
   exit 1
 fi
 
+if ! command -v openssl >/dev/null 2>&1 && ! command -v node >/dev/null 2>&1 \
+  && ! command -v docker >/dev/null 2>&1; then
+  echo "Needs openssl, Node.js or Docker to generate the secrets." >&2
+  exit 1
+fi
+
 rand() { # rand <bytes>
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -base64 "$1"
+  elif command -v node >/dev/null 2>&1; then
+    node -e "process.stdout.write(require('crypto').randomBytes($1).toString('base64'))"
   else
     docker run --rm node:24-alpine node -e "process.stdout.write(require('crypto').randomBytes($1).toString('base64'))"
   fi
@@ -35,3 +43,4 @@ chmod 600 .env
 echo "Created .env with generated secrets."
 echo "First administrator: $(sed -n 's/^INITIAL_ADMIN_USERNAME=//p' .env) / ${admin_password}"
 echo "Change ADMIN_ALLOWED_ORIGINS to the admin panel's public URL before production use."
+echo "Without Docker: point DATABASE_URL at your PostgreSQL (POSTGRES_* are used by docker compose only)."

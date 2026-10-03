@@ -16,6 +16,9 @@ docker compose up -d         # db → api-migrate (migrations + seed) → api on
 curl http://localhost:21114/api/health/ready
 ```
 
+Docker is optional: without it the stack is two Node.js 24 processes (API and panel) and your own
+PostgreSQL 18 — see [Without Docker](#without-docker).
+
 Contents: [Architecture](#architecture) · [RustDesk compatibility](#rustdesk-compatibility) ·
 [API reference](#api-reference) · [Session processing](#session-processing) ·
 [Installation](#installation) · [Client configuration](#rustdesk-client-configuration) ·
@@ -35,6 +38,7 @@ rustdesk-admin/
 │   ├── tsconfig/            shared tsconfig presets
 │   └── eslint-config/       shared ESLint flat config
 ├── scripts/                 init-env.sh, smoke.sh
+├── deploy/systemd/          without Docker: units for the API and the panel server
 ├── docker-compose.yml       db, api-migrate, api, web
 └── turbo.json               api#openapi:emit → api-contract#generate → web#build
 ```
@@ -303,6 +307,46 @@ docker compose logs -f api
 `INITIAL_ADMIN_USERNAME` / `INITIAL_ADMIN_PASSWORD`, only when no administrator exists), then
 `api` starts on port 21114. Rebuild after an upgrade with `docker compose up -d --build`.
 
+### Without Docker
+
+Two Node.js processes — the API and the admin panel — and nothing else. Requires Node.js 24
+(`.nvmrc`), pnpm 12 (`corepack enable` or `npm i -g pnpm@12`), and **PostgreSQL 18** that you run
+yourself (an empty database and a user that owns it). The commands run from the repository root,
+e.g. `/opt/rustdesk-admin`.
+
+```bash
+pnpm install --frozen-lockfile
+./scripts/init-env.sh                          # or: cp .env.example .env and fill in the secrets
+#   .env: DATABASE_URL=postgresql://<user>:<password>@<host>:5432/<db>
+#         TRUSTED_PROXIES=loopback             (the panel server proxies /api/ from this host)
+#         ADMIN_ALLOWED_ORIGINS=<the panel's URL, e.g. http://admin-host:8080>
+pnpm build                                     # API → OpenAPI contract → panel (apps/web/dist)
+pnpm --filter @rustdesk-admin/api db:deploy    # prisma migrate deploy
+pnpm --filter @rustdesk-admin/api db:seed      # first administrator (idempotent)
+pnpm --filter @rustdesk-admin/api start        # API on :21114
+pnpm --filter @rustdesk-admin/web start        # panel on :8080, /api/ proxied to the API
+```
+
+Both read `.env` from the repository root. The panel server (`apps/web/server.mjs`, no
+dependencies) does what nginx does in the container: serves `apps/web/dist` with the SPA fallback,
+caching and security headers, writes `/config.js` from the environment, and proxies `/api/` to
+`API_UPSTREAM`, so panel and API share one origin (required by the session cookie).
+
+| Variable (panel server)                   | Default                  | Meaning                                           |
+| ----------------------------------------- | ------------------------ | ------------------------------------------------- |
+| `WEB_HOST` / `WEB_PORT`                   | `0.0.0.0` / `8080`       | where the panel listens                           |
+| `API_UPSTREAM`                            | `http://127.0.0.1:21114` | the API (keep it on the same host: `loopback`)    |
+| `APP_NAME` / `ACTIVE_SESSIONS_REFRESH_MS` | build-time `VITE_*`      | panel name, active-sessions refresh (1000–300000) |
+
+As services: [`deploy/systemd/`](deploy/systemd) has a unit for each process
+(`rustdesk-admin-api`, `rustdesk-admin-web`); adjust paths and user, then
+`systemctl enable --now rustdesk-admin-api rustdesk-admin-web`. For HTTPS put any TLS proxy in front
+of the panel and add its address to `TRUSTED_PROXIES`.
+
+Upgrade: `git pull`, `pnpm install --frozen-lockfile`, `pnpm build`, `db:deploy`, then restart both
+processes (the panel server reads `dist` at startup). The other commands below (`ab:rotate-key`,
+`openapi`, tests) work the same way.
+
 ### Local development
 
 Requires Node.js 24 (`.nvmrc`) and pnpm 12 (`corepack enable` or `npm i -g pnpm@12`).
@@ -310,7 +354,8 @@ Requires Node.js 24 (`.nvmrc`) and pnpm 12 (`corepack enable` or `npm i -g pnpm@
 ```bash
 pnpm install
 ./scripts/init-env.sh                 # then set NODE_ENV=development in .env
-docker compose up -d db               # uncomment the db `ports` mapping first
+docker compose up -d db               # uncomment the db `ports` mapping first;
+                                      # or use a local PostgreSQL 18 and set DATABASE_URL in .env
 pnpm --filter @rustdesk-admin/api db:deploy   # or db:migrate while changing the schema
 pnpm --filter @rustdesk-admin/api db:seed
 pnpm dev                              # nest start --watch, pretty logs, Swagger at /api/docs
@@ -342,6 +387,9 @@ origin — required by the `SameSite=Strict` session cookie. Sign in with the se
   Never trust a whole range such as `uniquelocal` there: port 21114 is public, and a direct caller
   from a trusted range could spoof `X-Forwarded-For`.
 - Runtime settings of the web container: `API_UPSTREAM`, `APP_NAME`, `ACTIVE_SESSIONS_REFRESH_MS`.
+- Without Docker, `pnpm --filter @rustdesk-admin/web start` (`apps/web/server.mjs`) serves the
+  panel and proxies `/api/` instead of nginx, on the API's host, so `TRUSTED_PROXIES=loopback` is
+  the equivalent of the pinned container address.
 
 Architecture, contract matrix, screens, tests and the panel's production checklist:
 [`apps/web/README.md`](apps/web/README.md).
@@ -371,11 +419,15 @@ device groups and the accessible-devices tab, session recording upload.
 ## Testing
 
 ```bash
-pnpm test                                         # unit + integration (Docker required)
+pnpm test                                         # unit + integration (Docker, or TEST_DATABASE_URL)
 pnpm --filter @rustdesk-admin/api test:unit       # pure logic: state machine, time, errors, mappers, cipher, CIDR, env
 pnpm --filter @rustdesk-admin/api test:int        # Testcontainers PostgreSQL 18 + real migrations
+TEST_DATABASE_URL=postgresql://…/rustdesk_test pnpm test   # without Docker: an existing PostgreSQL 18
 BASE_URL=http://localhost:21114 PASSWORD=... ./scripts/smoke.sh   # realistic client sequence with curl
 ```
+
+`TEST_DATABASE_URL` must point to a **dedicated, disposable** database: the suites apply the
+migrations and `TRUNCATE` every table. Without it, Testcontainers starts PostgreSQL in Docker.
 
 Integration suites: client login (shape, `text/plain`, invalid, disabled, rate limit), tokens
 (expired, revoked, logout), address book (guid, pagination, empty-body 200s, tags propagation,
@@ -459,8 +511,8 @@ firewall, or reverse-proxy allowlist of your client networks) wherever possible.
   runtime config) are in [`apps/web/README.md`](apps/web/README.md#production-checklist).
 - **PostgreSQL**: automated backups (`pg_dump` or WAL archiving/PITR) with tested restores;
   monitor disk growth of `audit_events`.
-- **Migrations**: `prisma migrate deploy` only (the `api-migrate` service); never `migrate dev` in
-  production; back up before upgrading.
+- **Migrations**: `prisma migrate deploy` only (the `api-migrate` service, or `db:deploy` without
+  Docker); never `migrate dev` in production; back up before upgrading.
 - **Network**: firewall or proxy allowlist for the device endpoints, or `DEVICE_ALLOWED_CIDRS`.
 - **Rate limits**: tune `RATE_LIMIT_*` (counters are per instance; behind a load balancer the
   effective limit is per instance).

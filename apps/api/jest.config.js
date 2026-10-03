@@ -1,5 +1,5 @@
 // Two projects: fast unit tests next to the code, and integration tests against a real
-// PostgreSQL started by Testcontainers (Docker required).
+// PostgreSQL: TEST_DATABASE_URL, or one started by Testcontainers (Docker).
 /** @type {import('jest').Config} */
 const common = {
   moduleFileExtensions: ['js', 'json', 'ts'],

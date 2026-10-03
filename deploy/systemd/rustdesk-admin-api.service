@@ -1,0 +1,29 @@
+# The API server without Docker, as a systemd service.
+#
+#   cp deploy/systemd/rustdesk-admin-api.service /etc/systemd/system/
+#   replace /opt/rustdesk-admin, User and the node path (`command -v node`), then:
+#   systemctl daemon-reload && systemctl enable --now rustdesk-admin-api
+#
+# Configuration comes from /opt/rustdesk-admin/.env (read by the API itself); variables set here
+# with Environment= take precedence. Migrations and the seed are separate steps (see README.md).
+
+[Unit]
+Description=RustDesk admin API server
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rustdesk
+Group=rustdesk
+WorkingDirectory=/opt/rustdesk-admin/apps/api
+ExecStart=/usr/bin/node dist/src/main.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

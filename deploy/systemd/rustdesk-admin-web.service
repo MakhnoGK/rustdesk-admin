@@ -1,0 +1,30 @@
+# The admin panel without Docker, as a systemd service: apps/web/server.mjs serves the built panel
+# and proxies /api/ to the API (see rustdesk-admin-api.service).
+#
+#   cp deploy/systemd/rustdesk-admin-web.service /etc/systemd/system/
+#   replace /opt/rustdesk-admin, User and the node path (`command -v node`), then:
+#   systemctl daemon-reload && systemctl enable --now rustdesk-admin-web
+#
+# Configuration (WEB_PORT, API_UPSTREAM, APP_NAME, ...) comes from /opt/rustdesk-admin/.env;
+# variables set here with Environment= take precedence. Restart it after every panel build.
+
+[Unit]
+Description=RustDesk admin panel
+After=network-online.target rustdesk-admin-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rustdesk
+Group=rustdesk
+WorkingDirectory=/opt/rustdesk-admin/apps/web
+ExecStart=/usr/bin/node server.mjs
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

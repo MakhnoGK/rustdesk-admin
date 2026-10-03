@@ -29,7 +29,7 @@ Contents: [Architecture](#architecture) · [Contract matrix](#contract-matrix) �
 | API client   | `openapi-fetch` typed by `@rustdesk-admin/api-contract`; the only HTTP client is `src/api/client.ts`   |
 | Time         | date-fns 4 + `@date-fns/tz`; helpers in `src/lib/time.ts`                                              |
 | Tests        | Vitest 5 + React Testing Library + MSW 2 (unit and integration), Playwright (e2e)                      |
-| Serving      | unprivileged nginx (alpine): static files, SPA fallback, `/api/` reverse proxy, security headers       |
+| Serving      | unprivileged nginx (alpine) in Docker, `server.mjs` without: static files, SPA fallback, `/api/` proxy |
 
 **Relation to the API and to RustDesk.** The panel calls only `/api/admin/*` (and nothing of the
 RustDesk-facing namespace). It never talks to `hbbs`/`hbbr` and offers nothing RustDesk cannot do:
@@ -100,6 +100,7 @@ apps/web/
 │   └── test/               MSW server and handlers, fixtures, render helper
 ├── e2e/                    Playwright specs + in-browser API mock
 ├── docker/                 nginx.conf (template), security-headers.conf, entrypoint.sh
+├── server.mjs              without Docker: static files + /api/ proxy (replaces nginx)
 └── Dockerfile              turbo prune → pnpm build → nginx-unprivileged
 ```
 
@@ -213,6 +214,21 @@ server. Requests then reach the API from the nginx container, whose address dock
 never a whole private range: the API's own port is public and a direct caller could spoof
 `X-Forwarded-For`.
 
+### Without Docker (Node.js server, no nginx)
+
+```bash
+pnpm install --frozen-lockfile && pnpm build   # repo root; output: apps/web/dist
+pnpm --filter @rustdesk-admin/web start        # http://localhost:8080
+```
+
+`server.mjs` (Node.js built-ins only) replaces the container's nginx and entrypoint: the same
+static serving, SPA fallback, caching, security headers (read from `docker/security-headers.conf`),
+`/config.js` generated from `APP_NAME` / `ACTIVE_SESSIONS_REFRESH_MS`, and the `/api/` proxy to
+`API_UPSTREAM` (default `http://127.0.0.1:21114`) with `X-Forwarded-For` appended. It listens on
+`WEB_HOST:WEB_PORT` (default `0.0.0.0:8080`), reads the repository's `.env`, and loads `dist` once
+at startup — restart it after a build. The API on the same host needs `TRUSTED_PROXIES=loopback`.
+Starting the API without Docker: [root README](../../README.md#without-docker).
+
 Only same-origin deployment is supported: the session cookie is `SameSite=Strict`, so a panel on
 another origin than the API cannot sign in. Keep the API behind the panel's `/api/` proxy (or the
 same reverse proxy).
@@ -222,7 +238,7 @@ same reverse proxy).
 ```bash
 pnpm install                                   # repo root
 cp apps/web/.env.example apps/web/.env.local   # optional; defaults work
-docker compose up -d db api-migrate api        # or run apps/api with `pnpm dev`
+docker compose up -d db api-migrate api        # or run apps/api with `pnpm dev` (no Docker)
 pnpm --filter @rustdesk-admin/web dev          # http://localhost:5173, /api proxied to :21114
 ```
 
@@ -291,7 +307,7 @@ demand); the book it creates is deleted at the end.
 - **Caching**: `/assets/*` immutable for a year (hashed names); `index.html`, `config.js` and SPA
   routes `no-cache`, so a deploy is picked up on the next load.
 - **Runtime configuration**: `APP_NAME`, `ACTIVE_SESSIONS_REFRESH_MS`, `API_UPSTREAM` per
-  environment; nothing secret goes into `VITE_*` or `config.js`.
+  environment (without Docker: the same variables for `server.mjs`, plus `WEB_PORT`); nothing secret goes into `VITE_*` or `config.js`.
 - **Accessibility**: keyboard-only pass (skip link, sidebar, dialogs, menus, tables), screen reader
   pass on the active-sessions page (toasts and disconnect states are announced), and an axe/Lighthouse
   contrast check in both themes after any theme change.
