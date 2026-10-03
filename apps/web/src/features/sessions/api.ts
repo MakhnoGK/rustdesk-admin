@@ -22,6 +22,7 @@ export const sessionKeys = {
   details: () => [...sessionKeys.all, 'detail'] as const,
   detail: (id: string) => [...sessionKeys.details(), id] as const,
   disconnect: (id: string) => [...sessionKeys.all, 'disconnect', id] as const,
+  disconnectHistory: (id: string) => [...sessionKeys.all, 'disconnects', id] as const,
 };
 
 export function useSessionHistory(query: SessionListQuery) {
@@ -75,8 +76,19 @@ export const disconnectStateQueryOptions = (id: string) =>
     },
   });
 
-export function useLatestDisconnect(id: string | undefined) {
-  return useQuery({ ...disconnectStateQueryOptions(id ?? ''), enabled: !!id });
+/**
+ * Every disconnect request of a session, newest first. Polled while the newest one waits for
+ * delivery, like the latest-state query.
+ */
+export function useDisconnectHistory(id: string) {
+  return useQuery({
+    queryKey: sessionKeys.disconnectHistory(id),
+    queryFn: ({ signal }) =>
+      unwrap(api.GET('/api/admin/sessions/{id}/disconnects', { params: { path: { id } }, signal })),
+    refetchInterval: (query) =>
+      query.state.data?.[0]?.state === 'REQUESTED' ? DISCONNECT_POLL_MS : false,
+    refetchIntervalInBackground: false,
+  });
 }
 
 export function useRequestDisconnect() {
@@ -86,6 +98,9 @@ export function useRequestDisconnect() {
       unwrap(api.POST('/api/admin/sessions/{id}/disconnect', { params: { path: { id } } })),
     onSuccess: (disconnect) => {
       queryClient.setQueryData(sessionKeys.disconnect(disconnect.sessionId), disconnect);
+      void queryClient.invalidateQueries({
+        queryKey: sessionKeys.disconnectHistory(disconnect.sessionId),
+      });
     },
     meta: { errorsHandledBy: 'caller' },
   });

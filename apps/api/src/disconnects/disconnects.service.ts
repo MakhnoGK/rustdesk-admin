@@ -5,6 +5,12 @@ import { AppConfig } from '../config/app-config.service';
 import { type PendingDisconnect, SessionStatus } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
+/**
+ * Bound on the history of one session. A new request is only possible once the previous one was
+ * delivered or expired, so a session reaches this only after hours of retries.
+ */
+export const MAX_HISTORY = 100;
+
 export type DisconnectState = 'REQUESTED' | 'DELIVERED' | 'EXPIRED';
 
 export interface DisconnectRecord extends PendingDisconnect {
@@ -82,6 +88,22 @@ export class DisconnectsService {
     });
     if (!record) throw DomainError.notFound('Disconnect request');
     return this.toRecord(record, now);
+  }
+
+  /** Every request for a session, newest first, capped at MAX_HISTORY; 404 for an unknown session. */
+  async history(sessionId: string, now = new Date()): Promise<DisconnectRecord[]> {
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { id: true },
+    });
+    if (!session) throw DomainError.notFound('Session');
+    const rows = await this.prisma.pendingDisconnect.findMany({
+      where: { sessionId },
+      include: { requestedBy: { select: { username: true } } },
+      orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }],
+      take: MAX_HISTORY,
+    });
+    return rows.map((r) => this.toRecord(r, now));
   }
 
   /** Marks undelivered, unexpired requests of a device as delivered and returns their conn IDs. */

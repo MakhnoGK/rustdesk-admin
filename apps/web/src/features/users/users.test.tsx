@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import type { Token, User } from '@/api/types';
-import { ADMIN, makeToken, makeUser, page, type Page } from '@/test/fixtures';
+import { ADMIN, makeAdminSession, makeToken, makeUser, page, type Page } from '@/test/fixtures';
 import { renderApp } from '@/test/render';
 import { apiError, apiUrl, server } from '@/test/server';
 
@@ -166,5 +166,43 @@ describe('users', () => {
     await waitFor(() =>
       expect(within(table).queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument(),
     );
+  });
+
+  it('marks the current admin session and signs out when it is revoked', async () => {
+    const tokens: Token[] = [
+      makeToken({
+        id: '50000000-0000-4000-8000-0000000000c1',
+        userId: ADMIN.id,
+        kind: 'ADMIN_WEB',
+        clientId: null,
+        clientUuid: null,
+        userAgent: 'Firefox',
+        current: true,
+      }),
+    ];
+    let revoked: string | undefined;
+    server.use(
+      ...usersApi().handlers,
+      http.get(apiUrl('/users/:id/tokens'), () => HttpResponse.json<Page<Token>>(page(tokens))),
+      http.delete(apiUrl('/tokens/:id'), ({ params }) => {
+        revoked = String(params.id);
+        return new HttpResponse(null, { status: 204 });
+      }),
+      // The cookie's token is gone from here on.
+      http.get(apiUrl('/auth/me'), () =>
+        revoked
+          ? apiError(401, 'UNAUTHORIZED', 'Token revoked')
+          : HttpResponse.json(makeAdminSession()),
+      ),
+    );
+    const { user, router } = renderApp(`/users/${ADMIN.id}`);
+    const table = await screen.findByRole('table', { name: `Tokens of ${ADMIN.username}` });
+    expect(await within(table).findByText('This session')).toBeInTheDocument();
+    await user.click(within(table).getByRole('button', { name: 'Revoke' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText(/This is your current session/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Revoke and sign out' }));
+    await waitFor(() => expect(revoked).toBe('50000000-0000-4000-8000-0000000000c1'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/login'));
   });
 });

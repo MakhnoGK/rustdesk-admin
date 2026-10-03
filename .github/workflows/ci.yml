@@ -16,6 +16,7 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level high
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm format:check
@@ -26,5 +27,46 @@ jobs:
       - run: pnpm openapi
       - name: OpenAPI contract is up to date
         run: git diff --exit-code -- packages/api-contract/openapi.json packages/api-contract/src/schema.d.ts
-      - name: Docker image builds
-        run: docker build -f apps/api/Dockerfile .
+
+  # Builds both Docker images, then runs the Playwright specs twice: against the built panel with the
+  # API mocked in the browser, and against the real docker compose stack (plus the RustDesk client
+  # smoke script on the API port).
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium for Playwright
+        run: pnpm --filter @rustdesk-admin/web exec playwright install --with-deps chromium
+      - name: Playwright, mocked API
+        run: pnpm turbo run test:e2e --filter=@rustdesk-admin/web
+      - name: Start the stack (builds the api and web images)
+        run: |
+          ./scripts/init-env.sh
+          docker compose up -d --build --wait --wait-timeout 300
+      - name: Playwright, real stack
+        run: |
+          export E2E_USERNAME="$(sed -n 's/^INITIAL_ADMIN_USERNAME=//p' .env)"
+          export E2E_PASSWORD="$(sed -n 's/^INITIAL_ADMIN_PASSWORD=//p' .env)"
+          pnpm --filter @rustdesk-admin/web test:e2e
+        env:
+          E2E_BASE_URL: http://localhost:8080
+      - name: RustDesk client smoke test
+        run: |
+          USERNAME="$(sed -n 's/^INITIAL_ADMIN_USERNAME=//p' .env)" \
+          PASSWORD="$(sed -n 's/^INITIAL_ADMIN_PASSWORD=//p' .env)" \
+          ./scripts/smoke.sh
+      - name: Stack logs
+        if: failure()
+        run: docker compose logs --no-color --timestamps
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: apps/web/test-results
+          retention-days: 7

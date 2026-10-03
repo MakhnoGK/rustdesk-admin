@@ -32,6 +32,9 @@ export interface SessionListQuery {
   sort: SortSpec<SessionSortField>;
 }
 
+/** A session with the current hostname of its target device (sessions have no FK to devices). */
+export type SessionWithDevice = Session & { deviceHostname: string | null };
+
 /** Hard cap on events returned with one session (a session normally has three). */
 const MAX_EVENTS_PER_SESSION = 500;
 
@@ -39,7 +42,7 @@ const MAX_EVENTS_PER_SESSION = 500;
 export class SessionsQueryService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(query: SessionListQuery): Promise<Page<Session>> {
+  async list(query: SessionListQuery): Promise<Page<SessionWithDevice>> {
     const where: Prisma.SessionWhereInput = {
       status: query.status,
       deviceId: query.deviceId,
@@ -61,10 +64,10 @@ export class SessionsQueryService {
       }),
       this.prisma.session.count({ where }),
     ]);
-    return toPage(data, total, query);
+    return toPage(await this.withHostnames(data), total, query);
   }
 
-  async active(page: { page: number; pageSize: number }): Promise<Page<Session>> {
+  async active(page: { page: number; pageSize: number }): Promise<Page<SessionWithDevice>> {
     const where = { status: SessionStatus.ACTIVE };
     const [data, total] = await this.prisma.$transaction([
       this.prisma.session.findMany({
@@ -74,10 +77,10 @@ export class SessionsQueryService {
       }),
       this.prisma.session.count({ where }),
     ]);
-    return toPage(data, total, page);
+    return toPage(await this.withHostnames(data), total, page);
   }
 
-  async get(id: string): Promise<{ session: Session; events: AuditEvent[] }> {
+  async get(id: string): Promise<{ session: SessionWithDevice; events: AuditEvent[] }> {
     const session = await this.prisma.session.findUnique({ where: { id } });
     if (!session) throw DomainError.notFound('Session');
     const events = await this.prisma.auditEvent.findMany({
@@ -85,6 +88,21 @@ export class SessionsQueryService {
       orderBy: [{ receivedAt: 'asc' }, { id: 'asc' }],
       take: MAX_EVENTS_PER_SESSION,
     });
-    return { session, events };
+    const [withHostname] = await this.withHostnames([session]);
+    return { session: withHostname!, events };
+  }
+
+  /** One query per page: devices are keyed by machine UUID, which sessions store. */
+  private async withHostnames(sessions: Session[]): Promise<SessionWithDevice[]> {
+    const uuids = [...new Set(sessions.map((s) => s.deviceUuid))];
+    const devices =
+      uuids.length === 0
+        ? []
+        : await this.prisma.device.findMany({
+            where: { uuid: { in: uuids } },
+            select: { uuid: true, hostname: true },
+          });
+    const hostnames = new Map(devices.map((d) => [d.uuid, d.hostname]));
+    return sessions.map((s) => ({ ...s, deviceHostname: hostnames.get(s.deviceUuid) ?? null }));
   }
 }

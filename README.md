@@ -195,14 +195,14 @@ durations whole seconds. Password hashes, peer `hash` and `password` are never r
 | GET / POST           | `/users`                                                                                        | filters `search`, `role`, `status`; sort `username, createdAt, updatedAt, role, status` · create → 201                                |
 | GET / PATCH / DELETE | `/users/{id}`                                                                                   | PATCH `displayName,email,note,role,status`; no self demote/disable/delete; last active admin protected (409)                          |
 | POST                 | `/users/{id}/password`                                                                          | 204; revokes every token of the user                                                                                                  |
-| GET                  | `/users/{id}/tokens`                                                                            | token history, newest first                                                                                                           |
+| GET                  | `/users/{id}/tokens`                                                                            | token history, newest first; `current` marks the caller's own session                                                                 |
 | DELETE               | `/tokens/{id}`                                                                                  | 204, idempotent                                                                                                                       |
 | GET                  | `/devices`                                                                                      | `search` (RustDesk ID, hostname, user), `online`; sort `rustdeskId, hostname, lastHeartbeatAt, createdAt`                             |
 | GET                  | `/devices/{uuid}`                                                                               | with raw sysinfo (credentials redacted) and RustDesk ID history                                                                       |
 | GET / POST           | `/address-books`                                                                                | filters `kind`, `ownerId`, `search` · POST creates a shared book                                                                      |
 | GET / PATCH / DELETE | `/address-books/{guid}`                                                                         | DELETE only for shared books                                                                                                          |
 | GET / PUT            | `/address-books/{guid}/shares`                                                                  | PUT body `[{userId, rule}]` replaces the list                                                                                         |
-| GET / POST           | `/address-books/{guid}/peers`                                                                   | `search`, `tag`, pagination · `password` is write-only, shared books only                                                             |
+| GET / POST           | `/address-books/{guid}/peers`                                                                   | `search`, `tag` (repeatable) + `tagMode=any\|all`, pagination · `password` is write-only, shared books only                           |
 | PATCH / DELETE       | `/address-books/{guid}/peers/{peerId}`                                                          |                                                                                                                                       |
 | GET / POST           | `/address-books/{guid}/tags`                                                                    | with `peerCount`                                                                                                                      |
 | PATCH / DELETE       | `/address-books/{guid}/tags/{name}`                                                             | rename and/or color                                                                                                                   |
@@ -210,9 +210,14 @@ durations whole seconds. Password hashes, peer `hash` and `password` are never r
 | GET                  | `/sessions/active`                                                                              |                                                                                                                                       |
 | GET                  | `/sessions/{id}`                                                                                | with its audit events                                                                                                                 |
 | POST / GET           | `/sessions/{id}/disconnect`                                                                     | 201 created / 200 already pending · delivery state `REQUESTED / DELIVERED / EXPIRED`                                                  |
+| GET                  | `/sessions/{id}/disconnects`                                                                    | every request of the session, newest first (at most 100)                                                                              |
 | GET                  | `/stats/summary`, `/stats/timeseries?bucket=hour\|day`, `/stats/top?by=initiator\|target&limit` | `from`/`to` required, `[from, to)` on `startedAt`, at most `STATS_MAX_RANGE_DAYS`                                                     |
 | GET                  | `/audit-events`                                                                                 | `kind=conn\|file\|alarm, deviceId, sessionId, from, to`, `sort=receivedAt:asc\|desc`                                                  |
 | GET                  | `/system/info`                                                                                  | version and timing settings                                                                                                           |
+
+Sessions carry `deviceHostname` (the target device's current hostname, joined by machine UUID)
+and `connTypeName` (`REMOTE_DESKTOP`, `FILE_TRANSFER`, `PORT_FORWARD`, `VIEW_CAMERA`, `TERMINAL` for
+the client's `type` 0–4; `null` when unknown) next to the raw `connType`.
 
 ---
 
@@ -331,11 +336,14 @@ origin — required by the `SameSite=Strict` session cookie. Sign in with the se
 - `ADMIN_ALLOWED_ORIGINS` must contain the URL the browser uses for the panel
   (`http://localhost:8080` in Docker, `http://localhost:5173` for `pnpm --filter
 @rustdesk-admin/web dev`), or sign-in and every mutation fail the CSRF check.
-- Behind the panel's proxy the API sees the nginx container's address: set `TRUSTED_PROXIES`
-  (e.g. `uniquelocal`) so client IPs and rate limits stay per client.
+- docker compose pins the web container to `WEB_PROXY_IP` (default `172.31.250.10` in
+  `DOCKER_SUBNET`, default `172.31.250.0/24`) and adds that one address to the API's
+  `TRUSTED_PROXIES`, so client IPs and rate limits stay per client behind the panel's proxy.
+  Never trust a whole range such as `uniquelocal` there: port 21114 is public, and a direct caller
+  from a trusted range could spoof `X-Forwarded-For`.
 - Runtime settings of the web container: `API_UPSTREAM`, `APP_NAME`, `ACTIVE_SESSIONS_REFRESH_MS`.
 
-Architecture, contract matrix and gaps, screens, tests and the panel's production checklist:
+Architecture, contract matrix, screens, tests and the panel's production checklist:
 [`apps/web/README.md`](apps/web/README.md).
 
 ---
@@ -375,6 +383,11 @@ rules, `max_peer_one_ab`, legacy round trip), audit (duration, retried nonce, du
 out-of-order, SUPERSEDED, malformed), heartbeat (grace, reconciliation, `lastSeenAt`, disconnect
 exactly once, sysinfo), timeout sweep (incl. concurrent sweeps), admin (cookie, CSRF, roles,
 last admin, secrets never returned, stats against a known dataset, pagination limits).
+
+CI (`.github/workflows/ci.yml`) runs two jobs. `check`: `pnpm audit --audit-level high`,
+typecheck, lint, format, tests, build, and the OpenAPI contract diff. `e2e`: Playwright against the
+built panel with a mocked API, then `docker compose up --build` (both images) with secrets from
+`scripts/init-env.sh`, Playwright against that real stack, and `scripts/smoke.sh` on port 21114.
 
 ### curl examples (fictional IDs)
 
@@ -436,7 +449,7 @@ firewall, or reverse-proxy allowlist of your client networks) wherever possible.
 
 - **TLS**: terminate HTTPS at a reverse proxy (Caddy, nginx, Traefik); point clients' _API server_
   at `https://…`; set `TRUSTED_PROXIES` to the proxy address so `req.ip` and rate limits see real
-  client IPs. Do not expose `21114` directly.
+  client IPs (with docker compose the web container is already trusted; add only your proxy). Do not expose `21114` directly.
 - **Secrets**: generate `RUSTDESK_JWT_SECRET`, `ADMIN_JWT_SECRET` (different), `AB_SECRET_KEY`,
   `POSTGRES_PASSWORD`; keep `.env` out of version control (`chmod 600`). Rotating a JWT secret logs
   everyone out. **AB key rotation**: new key in `AB_SECRET_KEY` with a new `AB_SECRET_KEY_ID`, old

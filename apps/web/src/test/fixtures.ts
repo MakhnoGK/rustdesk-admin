@@ -61,6 +61,7 @@ export function makeSession(overrides: Partial<Session> = {}): Session {
     initiatorName: 'alice',
     initiatorIp: '203.0.113.7',
     connType: 0,
+    connTypeName: 'REMOTE_DESKTOP',
     startedAt: '2026-10-03T11:00:00.000Z',
     authenticatedAt: '2026-10-03T11:00:05.000Z',
     closedAt: null,
@@ -72,6 +73,7 @@ export function makeSession(overrides: Partial<Session> = {}): Session {
     updatedAt: '2026-10-03T11:59:58.000Z',
     deviceUuid: 'ZGV2aWNlLXV1aWQ=',
     deviceId: '987654321',
+    deviceHostname: 'desk-01',
     connId: 42,
     authenticated: true,
     durationEstimated: false,
@@ -185,6 +187,7 @@ export function makeToken(overrides: Partial<Token> = {}): Token {
     revokedAt: null,
     revokedReason: null,
     active: true,
+    current: false,
     ...overrides,
   };
 }

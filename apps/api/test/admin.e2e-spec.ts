@@ -235,7 +235,18 @@ describe('Admin API', () => {
         kind: 'RUSTDESK_CLIENT',
         clientId: '123456789',
         active: true,
+        current: false,
       });
+
+      // The caller's own admin session is marked; another admin session of the same user is not.
+      await adminLogin(t, 'root');
+      const own = (await get(`/users/${adminId}/tokens`).expect(200)).body as {
+        data: Array<{ kind: string; current: boolean }>;
+      };
+      expect(own.data.map((x) => [x.kind, x.current]).sort()).toEqual([
+        ['ADMIN_WEB', false],
+        ['ADMIN_WEB', true],
+      ]);
 
       await send('delete', `/tokens/${page.data[0]!.id}`).expect(204);
       await send('delete', `/tokens/${page.data[0]!.id}`).expect(204);
@@ -312,6 +323,27 @@ describe('Admin API', () => {
       const adminView = await get(`/address-books/${book.guid}/peers?tag=lobby`).expect(200);
       expect(JSON.stringify(adminView.body)).not.toContain('shared-secret');
       expect(adminView.body).toMatchObject({ total: 1 });
+
+      // Multi-tag filter: any (default) or all of the tags.
+      await send('post', `/address-books/${book.guid}/peers`)
+        .send({ peerId: '111', tags: ['lobby', 'floor2'] })
+        .expect(201);
+      await send('post', `/address-books/${book.guid}/peers`)
+        .send({ peerId: '222', tags: ['floor2'] })
+        .expect(201);
+      const ids = async (query: string) =>
+        (
+          (await get(`/address-books/${book.guid}/peers?${query}`).expect(200)).body as {
+            data: Array<{ peerId: string }>;
+          }
+        ).data.map((p) => p.peerId);
+      expect(await ids('tag=lobby&tag=floor2')).toEqual(['111', '222', '987654321']);
+      expect(await ids('tag=lobby&tag=floor2&tagMode=all')).toEqual(['111']);
+      expect(await ids('tag=floor2&tagMode=all')).toEqual(['111', '222']);
+      await get(`/address-books/${book.guid}/peers?tag=lobby&tagMode=some`).expect(422);
+      await send('delete', `/address-books/${book.guid}/peers/111`).expect(204);
+      await send('delete', `/address-books/${book.guid}/peers/222`).expect(204);
+      await send('delete', `/address-books/${book.guid}/tags/floor2`).expect(204);
 
       const tags = await get(`/address-books/${book.guid}/tags`).expect(200);
       expect(tags.body).toEqual([{ name: 'lobby', color: 0xff9e9e9e, peerCount: 1 }]);

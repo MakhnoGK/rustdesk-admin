@@ -20,6 +20,22 @@ export const textParam = (max = 100) =>
     .transform((v) => (v ? v : undefined))
     .catch(undefined);
 
+/**
+ * A repeated parameter (`tag=a&tag=b`): unique trimmed non-empty values, at most `maxItems`.
+ * A single occurrence arrives as a string (see `searchParamsToObject`).
+ */
+export const listParam = (max = 100, maxItems = 50) =>
+  z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((v) => {
+      const values = [
+        ...new Set((typeof v === 'string' ? [v] : (v ?? [])).map((x) => x.trim())),
+      ].filter((x) => x !== '' && x.length <= max);
+      return values.length ? values.slice(0, maxItems) : undefined;
+    })
+    .catch(undefined);
+
 export const enumParam = <const T extends readonly [string, ...string[]]>(values: T) =>
   z.enum(values).optional().catch(undefined);
 
@@ -58,15 +74,28 @@ export function parseSort(
   return { field, direction: dir };
 }
 
-/** Serializes a state patch into search params; empty values are removed. */
+export type PatchValue = string | number | boolean | readonly string[] | null | undefined;
+
+/** Search params as a plain object; a repeated key becomes an array of its values. */
+export function searchParamsToObject(params: URLSearchParams): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const key of new Set(params.keys())) {
+    const values = params.getAll(key);
+    out[key] = values.length > 1 ? values : (values[0] ?? '');
+  }
+  return out;
+}
+
+/** Serializes a state patch into search params; empty values are removed, arrays repeat the key. */
 export function applyPatch(
   params: URLSearchParams,
-  patch: Record<string, string | number | boolean | null | undefined>,
+  patch: Record<string, PatchValue>,
 ): URLSearchParams {
   const next = new URLSearchParams(params);
   for (const [key, value] of Object.entries(patch)) {
-    if (value === undefined || value === null || value === '') next.delete(key);
-    else next.set(key, String(value));
+    next.delete(key);
+    if (Array.isArray(value)) for (const v of value as readonly string[]) next.append(key, v);
+    else if (value !== undefined && value !== null && value !== '') next.set(key, String(value));
   }
   return next;
 }

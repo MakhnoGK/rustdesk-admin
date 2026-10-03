@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { closeReasonText, connTypeLabel, disconnectPhase } from '@/lib/format';
-import { useLatestDisconnect, useSession } from '../api';
+import { useDisconnectHistory, useSession } from '../api';
 import { AuthenticatedBadge, InitiatorCell, TargetCell } from './session-cells';
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -39,32 +39,40 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function LatestDisconnect({ sessionId, closed }: { sessionId: string; closed: boolean }) {
-  const latest = useLatestDisconnect(sessionId);
-  if (latest.isPending) return <Skeleton className="h-6 w-48" />;
-  if (latest.error)
-    return <p className="text-sm text-muted-foreground">Could not load the disconnect state.</p>;
-  if (!latest.data)
+function DisconnectHistory({ sessionId, closed }: { sessionId: string; closed: boolean }) {
+  const history = useDisconnectHistory(sessionId);
+  if (history.isPending) return <Skeleton className="h-6 w-48" />;
+  if (history.error)
+    return <p className="text-sm text-muted-foreground">Could not load the disconnect requests.</p>;
+  if (!history.data.length)
     return <p className="text-sm text-muted-foreground">No remote disconnect was requested.</p>;
-  const d = latest.data;
   return (
-    <dl>
-      <Field label="State">
-        <DisconnectState phase={disconnectPhase(d.state, closed && d.state === 'DELIVERED')} />
-      </Field>
-      <Field label="Requested">
-        <DateTimeText value={d.requestedAt} />
-        {d.requestedBy ? (
-          <span className="text-muted-foreground"> by {d.requestedBy.username}</span>
-        ) : null}
-      </Field>
-      <Field label="Delivered">
-        <DateTimeText value={d.deliveredAt} fallback="Not yet" />
-      </Field>
-      <Field label="Expires">
-        <DateTimeText value={d.expiresAt} />
-      </Field>
-    </dl>
+    <ol className="space-y-3" aria-label="Disconnect requests, newest first">
+      {history.data.map((d, i) => (
+        <li key={d.id} className={i > 0 ? 'border-t pt-3' : undefined}>
+          <dl>
+            <Field label="State">
+              {/* Only the newest request can have closed the session. */}
+              <DisconnectState
+                phase={disconnectPhase(d.state, i === 0 && closed && d.state === 'DELIVERED')}
+              />
+            </Field>
+            <Field label="Requested">
+              <DateTimeText value={d.requestedAt} />
+              {d.requestedBy ? (
+                <span className="text-muted-foreground"> by {d.requestedBy.username}</span>
+              ) : null}
+            </Field>
+            <Field label="Delivered">
+              <DateTimeText value={d.deliveredAt} fallback="Not yet" />
+            </Field>
+            <Field label="Expires">
+              <DateTimeText value={d.expiresAt} />
+            </Field>
+          </dl>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -123,9 +131,7 @@ function Details({ session }: { session: SessionDetail }) {
             </span>
           ) : null}
         </Field>
-        <Field label="Connection type">
-          <span className="tabular-nums">{connTypeLabel(session.connType)}</span>
-        </Field>
+        <Field label="Connection type">{connTypeLabel(session)}</Field>
         <Field label="Started">
           <DateTimeText value={session.startedAt} />
         </Field>
@@ -154,10 +160,7 @@ function Details({ session }: { session: SessionDetail }) {
       </dl>
       <Separator />
       <Section title="Remote disconnect">
-        <LatestDisconnect sessionId={session.id} closed={closed} />
-        <p className="text-xs text-muted-foreground">
-          The API exposes only the latest request of a session.
-        </p>
+        <DisconnectHistory sessionId={session.id} closed={closed} />
       </Section>
       <Separator />
       <Section title="Audit events">

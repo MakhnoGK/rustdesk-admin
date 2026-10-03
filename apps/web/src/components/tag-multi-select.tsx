@@ -22,6 +22,7 @@ export function TagMultiSelect({
   id,
   invalid,
   disabled,
+  placeholder = 'Select tags',
 }: {
   tags: Tag[];
   value: string[];
@@ -29,6 +30,7 @@ export function TagMultiSelect({
   id?: string;
   invalid?: boolean;
   disabled?: boolean;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const listId = useId();
@@ -51,7 +53,7 @@ export function TagMultiSelect({
             disabled={disabled}
             className="w-full justify-between font-normal"
           >
-            {value.length ? `${value.length} selected` : 'Select tags'}
+            {value.length ? `${value.length} selected` : placeholder}
             <ChevronsUpDownIcon aria-hidden className="opacity-50" />
           </Button>
         </PopoverTrigger>

@@ -1,7 +1,14 @@
 import { z } from 'zod';
 import type { AddressBookListQuery, PeerListQuery } from '@/api/types';
 import { isHexColor } from '@/lib/color';
-import { enumParam, pageParam, pageSizeParam, sortParam, textParam } from '@/lib/url-state';
+import {
+  enumParam,
+  listParam,
+  pageParam,
+  pageSizeParam,
+  sortParam,
+  textParam,
+} from '@/lib/url-state';
 
 export const BOOK_SORT_FIELDS = ['name', 'createdAt', 'updatedAt'] as const;
 
@@ -32,14 +39,24 @@ export const bookViewSearchSchema = z.object({
   tab: enumParam(['peers', 'tags']).transform((v) => v ?? 'peers'),
   page: pageParam,
   q: textParam(100),
-  tag: textParam(100),
+  /** Repeated: `tag=a&tag=b`. */
+  tag: listParam(100, 50),
+  /** How several tags combine; absent = any. */
+  tagMode: enumParam(['any', 'all']),
 });
 export type BookViewSearch = z.output<typeof bookViewSearchSchema>;
 
 export const PEER_PAGE_SIZE = 50;
 
 export function toPeerListQuery(s: BookViewSearch): PeerListQuery {
-  return { page: s.page, pageSize: PEER_PAGE_SIZE, search: s.q, tag: s.tag };
+  return {
+    page: s.page,
+    pageSize: PEER_PAGE_SIZE,
+    search: s.q,
+    tag: s.tag,
+    // Only meaningful with two or more tags; omitted otherwise so the query key stays stable.
+    tagMode: s.tag && s.tag.length > 1 ? (s.tagMode ?? 'any') : undefined,
+  };
 }
 
 // ---- Forms (mirroring the OpenAPI schemas) -----------------------------------------------------

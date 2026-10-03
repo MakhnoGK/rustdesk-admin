@@ -4,13 +4,9 @@ import type { BookSummary, ShareRecord } from '../address-books/address-books.se
 import type { PeerRecord, TagRecord } from '../address-books/address-books.types';
 import { toIso } from '../common/time/time';
 import type { DisconnectRecord } from '../disconnects/disconnects.service';
-import type {
-  AuditEvent,
-  AuthToken,
-  Device,
-  DeviceIdChange,
-  Session,
-} from '../generated/prisma/client';
+import type { AuditEvent, AuthToken, Device, DeviceIdChange } from '../generated/prisma/client';
+import { connTypeName } from '../sessions/conn-type';
+import type { SessionWithDevice } from '../sessions/sessions-query.service';
 import type { UserRecord } from '../users/users.service';
 import type { AddressBookDto, AdminPeerDto, AdminTagDto, ShareDto } from './dto/address-books.dto';
 import type { DeviceDetailDto, DeviceDto } from './dto/devices.dto';
@@ -31,7 +27,7 @@ export function toUserDto(u: UserRecord): UserDto {
   };
 }
 
-export function toTokenDto(t: AuthToken, now = new Date()): TokenDto {
+export function toTokenDto(t: AuthToken, currentTokenId: string, now = new Date()): TokenDto {
   return {
     id: t.id,
     userId: t.userId,
@@ -47,6 +43,7 @@ export function toTokenDto(t: AuthToken, now = new Date()): TokenDto {
     revokedAt: toIso(t.revokedAt),
     revokedReason: t.revokedReason,
     active: t.revokedAt === null && t.expiresAt > now,
+    current: t.id === currentTokenId,
   };
 }
 
@@ -125,17 +122,19 @@ export function toTagDto(t: TagRecord): AdminTagDto {
   return { name: t.name, color: t.color, peerCount: t.peerCount ?? 0 };
 }
 
-export function toSessionDto(s: Session): SessionDto {
+export function toSessionDto(s: SessionWithDevice): SessionDto {
   return {
     id: s.id,
     deviceUuid: s.deviceUuid,
     deviceId: s.deviceId,
+    deviceHostname: s.deviceHostname,
     connId: s.connId,
     rustdeskSessionId: s.rustdeskSessionId,
     initiatorId: s.initiatorId,
     initiatorName: s.initiatorName,
     initiatorIp: s.initiatorIp,
     connType: s.connType,
+    connTypeName: connTypeName(s.connType),
     authenticated: s.authenticated,
     startedAt: toIso(s.startedAt),
     authenticatedAt: toIso(s.authenticatedAt),

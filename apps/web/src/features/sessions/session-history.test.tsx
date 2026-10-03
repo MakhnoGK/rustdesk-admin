@@ -1,7 +1,14 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import type { Session, SessionDetail } from '@/api/types';
-import { makeAuditEvent, makeSession, makeSessionDetail, page, type Page } from '@/test/fixtures';
+import type { Disconnect, Session, SessionDetail } from '@/api/types';
+import {
+  makeAuditEvent,
+  makeDisconnect,
+  makeSession,
+  makeSessionDetail,
+  page,
+  type Page,
+} from '@/test/fixtures';
 import { locationOf, renderApp } from '@/test/render';
 import { apiUrl, server } from '@/test/server';
 
@@ -123,12 +130,7 @@ describe('session history', () => {
           makeSessionDetail({ ...closed, events: [makeAuditEvent()] }),
         ),
       ),
-      http.get(apiUrl('/sessions/:id/disconnect'), () =>
-        HttpResponse.json(
-          { error: { code: 'NOT_FOUND', message: 'No disconnect' } },
-          { status: 404 },
-        ),
-      ),
+      http.get(apiUrl('/sessions/:id/disconnects'), () => HttpResponse.json<Disconnect[]>([])),
     );
     const { user, router } = renderApp('/sessions');
     await user.click(await screen.findByRole('button', { name: /^Details of session/ }));
@@ -142,5 +144,59 @@ describe('session history', () => {
     const payload = within(sheet).getByRole('region', { name: /Payload of the new event/ });
     expect(payload.textContent).toContain('<script>alert(1)</script>');
     expect(sheet.querySelector('script')).toBeNull();
+  });
+
+  it('shows the target hostname and the connection type name', async () => {
+    server.use(
+      historyHandler([
+        closed,
+        makeSession({
+          id: '10000000-0000-4000-8000-0000000000ab',
+          deviceId: '555666777',
+          deviceHostname: null,
+          connType: 9,
+          connTypeName: null,
+          status: 'CLOSED',
+        }),
+      ]).handler,
+    );
+    renderApp('/sessions');
+    const first = (await screen.findByText('987654321')).closest('tr') as HTMLElement;
+    expect(within(first).getByText('desk-01')).toBeInTheDocument();
+    expect(within(first).getByText('Remote desktop')).toBeInTheDocument();
+    const second = screen.getByText('555666777').closest('tr') as HTMLElement;
+    expect(within(second).getByText('Unknown (9)')).toBeInTheDocument();
+  });
+
+  it('lists every disconnect request of a session, newest first', async () => {
+    server.use(
+      historyHandler([closed]).handler,
+      http.get(apiUrl('/sessions/:id'), () =>
+        HttpResponse.json<SessionDetail>(makeSessionDetail({ ...closed, events: [] })),
+      ),
+      http.get(apiUrl('/sessions/:id/disconnects'), () =>
+        HttpResponse.json<Disconnect[]>([
+          makeDisconnect({
+            id: '20000000-0000-4000-8000-0000000000b2',
+            state: 'DELIVERED',
+            deliveredAt: '2026-10-03T12:03:00.000Z',
+            requestedBy: { id: '00000000-0000-4000-8000-000000000002', username: 'bob' },
+          }),
+          makeDisconnect({ id: '20000000-0000-4000-8000-0000000000b1', state: 'EXPIRED' }),
+        ]),
+      ),
+    );
+    const { user } = renderApp('/sessions');
+    await user.click(await screen.findByRole('button', { name: /^Details of session/ }));
+    const sheet = await screen.findByRole('dialog');
+    const list = await within(sheet).findByRole('list', {
+      name: 'Disconnect requests, newest first',
+    });
+    const items = within(list).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    // The session is closed and the newest request was delivered: it closed the session.
+    expect(within(items[0]!).getByText('Session closed')).toBeInTheDocument();
+    expect(within(items[0]!).getByText(/by bob/)).toBeInTheDocument();
+    expect(within(items[1]!).getByText('Request expired')).toBeInTheDocument();
   });
 });

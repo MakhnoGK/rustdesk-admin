@@ -6,15 +6,26 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useNow } from '@/hooks/use-now';
 import { elapsedSeconds, formatDuration, secondsSince } from '@/lib/time';
 
-/** The controlled device: the one that reported the session. */
-export function TargetCell({ session }: { session: Pick<Session, 'deviceId' | 'deviceUuid'> }) {
+/** The controlled device (the one that reported the session): RustDesk ID and current hostname. */
+export function TargetCell({
+  session,
+}: {
+  session: Pick<Session, 'deviceId' | 'deviceUuid' | 'deviceHostname'>;
+}) {
   return (
-    <Link
-      to={`/devices/${encodeURIComponent(session.deviceUuid)}`}
-      className="font-mono tabular-nums underline-offset-4 hover:underline"
-    >
-      {session.deviceId}
-    </Link>
+    <span className="flex flex-col">
+      <Link
+        to={`/devices/${encodeURIComponent(session.deviceUuid)}`}
+        className="font-mono tabular-nums underline-offset-4 hover:underline"
+      >
+        {session.deviceId}
+      </Link>
+      {session.deviceHostname ? (
+        <span className="max-w-48 truncate text-xs text-muted-foreground">
+          {session.deviceHostname}
+        </span>
+      ) : null}
+    </span>
   );
 }
 

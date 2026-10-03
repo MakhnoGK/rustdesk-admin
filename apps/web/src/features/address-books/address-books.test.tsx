@@ -13,15 +13,17 @@ function bookApi(initial: { peers?: Peer[]; tags?: Tag[] } = {}) {
   let peers = initial.peers ?? [makePeer()];
   let tags = initial.tags ?? [makeTag(), makeTag({ name: 'vip', color: 0xffef4444, peerCount: 0 })];
   const bodies: unknown[] = [];
+  const queries: URLSearchParams[] = [];
   const countOf = (name: string) => peers.filter((p) => p.tags.includes(name)).length;
   const handlers = [
     http.get(apiUrl('/address-books/:guid'), () => HttpResponse.json<AddressBook>(book)),
     http.get(apiUrl('/address-books/:guid/tags'), () =>
       HttpResponse.json<Tag[]>(tags.map((t) => ({ ...t, peerCount: countOf(t.name) }))),
     ),
-    http.get(apiUrl('/address-books/:guid/peers'), () =>
-      HttpResponse.json<Page<Peer>>(page(peers)),
-    ),
+    http.get(apiUrl('/address-books/:guid/peers'), ({ request }) => {
+      queries.push(new URL(request.url).searchParams);
+      return HttpResponse.json<Page<Peer>>(page(peers));
+    }),
     http.post(apiUrl('/address-books/:guid/peers'), async ({ request }) => {
       const body = (await request.json()) as Peer;
       bodies.push(body);
@@ -57,7 +59,13 @@ function bookApi(initial: { peers?: Peer[]; tags?: Tag[] } = {}) {
       return new HttpResponse(null, { status: 204 });
     }),
   ];
-  return { handlers, bodies, peers: () => peers, tags: () => tags };
+  return {
+    handlers,
+    bodies,
+    peers: () => peers,
+    tags: () => tags,
+    lastQuery: () => queries[queries.length - 1],
+  };
 }
 
 describe('address book peers', () => {
@@ -127,6 +135,46 @@ describe('address book peers', () => {
     await waitFor(() => expect(api.bodies).toHaveLength(1));
     expect(api.bodies[0]).toMatchObject({ tags: [] });
     expect(api.bodies[0]).not.toHaveProperty('password');
+  });
+});
+
+describe('peer tag filter', () => {
+  it('filters by several tags, any or all of them, through the URL', async () => {
+    const api = bookApi();
+    server.use(...api.handlers);
+    const { user, router } = renderApp(BOOK_URL);
+    await screen.findByRole('button', { name: 'Actions for peer 555666777' });
+
+    await user.click(screen.getByRole('combobox', { name: 'Tags' }));
+    await user.click(await screen.findByRole('option', { name: 'office' }));
+    // One tag: no mode is sent.
+    await waitFor(() => expect(api.lastQuery()?.getAll('tag')).toEqual(['office']));
+    expect(api.lastQuery()?.has('tagMode')).toBe(false);
+    await user.click(await screen.findByRole('option', { name: 'vip' }));
+    await waitFor(() => expect(api.lastQuery()?.getAll('tag')).toEqual(['office', 'vip']));
+    // Two tags: "any" is the default and is sent explicitly.
+    expect(api.lastQuery()?.get('tagMode')).toBe('any');
+    expect(router.state.location.search).toBe('?tag=office&tag=vip');
+
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('combobox', { name: 'Match' }));
+    await user.click(await screen.findByRole('option', { name: 'All of the tags' }));
+    await waitFor(() => expect(api.lastQuery()?.get('tagMode')).toBe('all'));
+    expect(router.state.location.search).toBe('?tag=office&tag=vip&tagMode=all');
+
+    // Down to one tag: the mode no longer applies and leaves the URL.
+    await user.click(screen.getByRole('button', { name: 'Remove tag vip' }));
+    await waitFor(() => expect(router.state.location.search).toBe('?tag=office'));
+    expect(screen.queryByRole('combobox', { name: 'Match' })).not.toBeInTheDocument();
+  });
+
+  it('restores the tags from a shared link', async () => {
+    const api = bookApi();
+    server.use(...api.handlers);
+    renderApp(`${BOOK_URL}?tag=vip&tag=office&tag=vip&tagMode=all`);
+    await waitFor(() => expect(api.lastQuery()?.getAll('tag')).toEqual(['vip', 'office']));
+    expect(api.lastQuery()?.get('tagMode')).toBe('all');
+    expect(await screen.findByRole('combobox', { name: 'Tags' })).toHaveTextContent('2 selected');
   });
 });
 

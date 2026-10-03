@@ -1,6 +1,8 @@
 import type {
   AuditKind,
+  ConnTypeName,
   DisconnectState,
+  Session,
   SessionCloseReason,
   ShareRule,
   TokenKind,
@@ -31,12 +33,18 @@ export function closeReasonLabel(reason: SessionCloseReason | null): string {
   return reason ? CLOSE_REASON_SHORT[reason] : '—';
 }
 
-/**
- * The API exposes the RustDesk connection type only as the client's raw integer and no label, so
- * the raw value is shown. No mapping is invented here.
- */
-export function connTypeLabel(connType: number | null): string {
-  return connType === null ? '—' : String(connType);
+const CONN_TYPE_LABELS: Record<ConnTypeName, string> = {
+  REMOTE_DESKTOP: 'Remote desktop',
+  FILE_TRANSFER: 'File transfer',
+  PORT_FORWARD: 'Port forward',
+  VIEW_CAMERA: 'View camera',
+  TERMINAL: 'Terminal',
+};
+
+/** The API names the known values; a value it does not know is shown raw. */
+export function connTypeLabel(session: Pick<Session, 'connType' | 'connTypeName'>): string {
+  if (session.connTypeName) return CONN_TYPE_LABELS[session.connTypeName];
+  return session.connType === null ? '—' : `Unknown (${session.connType})`;
 }
 
 export const SHARE_RULES: { value: ShareRule; label: string; description: string }[] = [

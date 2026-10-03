@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/empty-state';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { endSession } from '@/features/auth/session-end';
 import { useUrlState } from '@/hooks/use-url-state';
 import { tokenKindLabel } from '@/lib/format';
 import { useRevokeToken, useUserTokens } from '../api';
@@ -69,7 +70,16 @@ export function TokensTable({ userId, username }: { userId: string; username: st
 
   const columns = useMemo<ColumnDef<Token>[]>(
     () => [
-      { id: 'kind', header: 'Kind', cell: ({ row }) => tokenKindLabel(row.original.kind) },
+      {
+        id: 'kind',
+        header: 'Kind',
+        cell: ({ row }) => (
+          <span className="flex flex-wrap items-center gap-1.5">
+            {tokenKindLabel(row.original.kind)}
+            {row.original.current ? <Badge variant="secondary">This session</Badge> : null}
+          </span>
+        ),
+      },
       {
         id: 'client',
         header: 'Client device',
@@ -157,11 +167,10 @@ export function TokensTable({ userId, username }: { userId: string; username: st
         onOpenChange={(open) => !open && setRevoking(null)}
         title="Revoke this token?"
         description={
-          revoking?.kind === 'ADMIN_WEB' ? (
-            <p>
-              This admin panel session is signed out. If it is your current session, you are signed
-              out too.
-            </p>
+          revoking?.current ? (
+            <p>This is your current session: you are signed out of the admin panel.</p>
+          ) : revoking?.kind === 'ADMIN_WEB' ? (
+            <p>This admin panel session is signed out.</p>
           ) : (
             <p>
               The RustDesk client{revoking?.clientId ? ` ${revoking.clientId}` : ''} is signed out
@@ -169,15 +178,17 @@ export function TokensTable({ userId, username }: { userId: string; username: st
             </p>
           )
         }
-        confirmLabel="Revoke"
+        confirmLabel={revoking?.current ? 'Revoke and sign out' : 'Revoke'}
         destructive
         pending={revoke.isPending}
         onConfirm={() =>
           revoking &&
           revoke.mutate(revoking.id, {
             onSuccess: () => {
-              toast.success('Token revoked');
               setRevoking(null);
+              // The cookie's token is gone: the next request would 401 anyway.
+              if (revoking.current) endSession();
+              else toast.success('Token revoked');
             },
             onError: () => setRevoking(null),
           })

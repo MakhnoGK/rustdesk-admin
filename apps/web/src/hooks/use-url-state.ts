@@ -1,9 +1,9 @@
 import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 import type { z } from 'zod';
-import { applyPatch } from '@/lib/url-state';
+import { applyPatch, type PatchValue, searchParamsToObject } from '@/lib/url-state';
 
-type Patch = Record<string, string | number | boolean | null | undefined>;
+type Patch = Record<string, PatchValue>;
 
 /**
  * Filters, sort, page and tabs kept in the URL: shareable, and the back button works.
@@ -12,7 +12,7 @@ type Patch = Record<string, string | number | boolean | null | undefined>;
 export function useUrlState<S extends z.ZodType<Record<string, unknown>>>(schema: S) {
   const [params, setParams] = useSearchParams();
 
-  const state = useMemo(() => schema.parse(Object.fromEntries(params)), [params, schema]);
+  const state = useMemo(() => schema.parse(searchParamsToObject(params)), [params, schema]);
 
   const update = useCallback(
     (patch: Patch, options?: { replace?: boolean }) => {
@@ -33,8 +33,7 @@ export function useUrlState<S extends z.ZodType<Record<string, unknown>>>(schema
       setParams((prev) => {
         const next = new URLSearchParams();
         for (const key of keep) {
-          const value = prev.get(key);
-          if (value !== null) next.set(key, value);
+          for (const value of prev.getAll(key)) next.append(key, value);
         }
         return next;
       });

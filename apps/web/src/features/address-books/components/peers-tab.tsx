@@ -17,7 +17,8 @@ import { DataTable } from '@/components/data-table';
 import { DebouncedInput } from '@/components/debounced-input';
 import { EmptyState } from '@/components/empty-state';
 import { StaleDataAlert } from '@/components/stale-data-alert';
-import { TagChip, TagColorDot } from '@/components/tag-chip';
+import { TagChip } from '@/components/tag-chip';
+import { TagMultiSelect } from '@/components/tag-multi-select';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -35,12 +36,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useDeletePeer, usePeers } from '../api';
+import type { PatchValue } from '@/lib/url-state';
 import { PEER_PAGE_SIZE, toPeerListQuery, type BookViewSearch } from '../schemas';
 import { PeerFormDialog } from './peer-form-dialog';
 
-const ANY = '__any__';
-
-type Update = (patch: Record<string, string | number | undefined>) => void;
+type Update = (patch: Record<string, PatchValue>) => void;
 
 export function PeersTab({
   book,
@@ -59,6 +59,7 @@ export function PeersTab({
   const [editing, setEditing] = useState<Peer | null>(null);
   const [adding, setAdding] = useState(false);
   const [deleting, setDeleting] = useState<Peer | null>(null);
+  const selectedTags = state.tag ?? [];
   const filtered = state.q !== undefined || state.tag !== undefined;
   const colors = useMemo(() => new Map(tags.map((t) => [t.name, t.color])), [tags]);
 
@@ -170,26 +171,33 @@ export function PeersTab({
             placeholder="Peer ID, alias, hostname"
           />
         </div>
-        <div className="w-48 space-y-1.5">
-          <Label htmlFor={`${id}-tag`}>Tag</Label>
-          <Select
-            value={state.tag ?? ANY}
-            onValueChange={(v) => update({ tag: v === ANY ? undefined : v })}
-          >
-            <SelectTrigger id={`${id}-tag`} className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ANY}>Any tag</SelectItem>
-              {tags.map((t) => (
-                <SelectItem key={t.name} value={t.name}>
-                  <TagColorDot color={t.color} />
-                  {t.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="w-full space-y-1.5 sm:w-56">
+          <Label htmlFor={`${id}-tag`}>Tags</Label>
+          <TagMultiSelect
+            id={`${id}-tag`}
+            tags={tags}
+            value={selectedTags}
+            onChange={(tag) => update({ tag, ...(tag.length < 2 ? { tagMode: undefined } : {}) })}
+            placeholder="Any tag"
+          />
         </div>
+        {selectedTags.length > 1 ? (
+          <div className="w-40 space-y-1.5">
+            <Label htmlFor={`${id}-tag-mode`}>Match</Label>
+            <Select
+              value={state.tagMode ?? 'any'}
+              onValueChange={(v) => update({ tagMode: v === 'any' ? undefined : v })}
+            >
+              <SelectTrigger id={`${id}-tag-mode`} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="any">Any of the tags</SelectItem>
+                <SelectItem value="all">All of the tags</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
         <Button className="ml-auto" onClick={() => setAdding(true)}>
           <PlusIcon aria-hidden /> Add peer
         </Button>
@@ -219,7 +227,10 @@ export function PeersTab({
               icon={SearchXIcon}
               title="No peers match these filters"
               action={
-                <Button variant="outline" onClick={() => update({ q: undefined, tag: undefined })}>
+                <Button
+                  variant="outline"
+                  onClick={() => update({ q: undefined, tag: undefined, tagMode: undefined })}
+                >
                   Clear filters
                 </Button>
               }

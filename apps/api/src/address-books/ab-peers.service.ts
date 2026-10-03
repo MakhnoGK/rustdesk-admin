@@ -33,9 +33,17 @@ export class AbPeersService {
     query: PeerListQuery,
     opts: { withSecrets: boolean },
   ): Promise<{ total: number; data: PeerRecord[] }> {
+    const tags = [...new Set(query.tags ?? [])];
+    const hasTag = (name: string): Prisma.AbPeerWhereInput => ({
+      tags: { some: { tag: { name } } },
+    });
     const where: Prisma.AbPeerWhereInput = {
       bookGuid: guid,
-      ...(query.tag ? { tags: { some: { tag: { name: query.tag } } } } : {}),
+      ...(tags.length === 0
+        ? {}
+        : query.tagMode === 'all'
+          ? { AND: tags.map(hasTag) }
+          : { tags: { some: { tag: { name: { in: tags } } } } }),
       ...(query.search
         ? {
             OR: (['peerId', 'alias', 'hostname', 'username', 'note'] as const).map((f) => ({

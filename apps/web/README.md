@@ -9,7 +9,7 @@ docker compose up -d                 # from the repo root: db → api-migrate �
 open http://localhost:8080           # sign in as INITIAL_ADMIN_USERNAME / INITIAL_ADMIN_PASSWORD
 ```
 
-Contents: [Architecture](#architecture) · [Contract matrix and gaps](#contract-matrix-and-gaps) ·
+Contents: [Architecture](#architecture) · [Contract matrix](#contract-matrix) ·
 [Screens](#screens) · [Running](#installation-and-running) · [Testing](#testing) ·
 [Production checklist](#production-checklist)
 
@@ -124,7 +124,7 @@ Form uses the current `Field` components (the registry no longer ships `form` fo
 
 ---
 
-## Contract matrix and gaps
+## Contract matrix
 
 All paths are under `/api/admin`. "Yes" = present in `packages/api-contract/openapi.json`.
 
@@ -141,7 +141,7 @@ All paths are under `/api/admin`. "Yes" = present in `packages/api-contract/open
 | Follow disconnect                 | `GET /sessions/:id/disconnect`, `GET /sessions/:id`                                                      | Yes         | polled every 2 s until delivered/expired and closed                         |
 | Session history                   | `GET /sessions` (status, deviceId, initiatorId, authenticated, from, to, minDurationSeconds, sort, page) | Yes         | all server-side                                                             |
 | Session detail + audit timeline   | `GET /sessions/:id` (`events`)                                                                           | Yes         |                                                                             |
-| Disconnect history (detail sheet) | `GET /sessions/:id/disconnect`                                                                           | Partly      | only the **latest** request — see gap 3                                     |
+| Disconnect history (detail sheet) | `GET /sessions/:id/disconnects`                                                                          | Yes         | every request, newest first (at most 100); polled while the newest waits    |
 | Devices                           | `GET /devices?search&online&sort&page`                                                                   | Yes         |                                                                             |
 | Device detail                     | `GET /devices/:uuid`                                                                                     | Yes         | uuid is base64: URL-encoded in links and requests                           |
 | Device's recent sessions          | `GET /sessions?deviceId=<rustdeskId>`                                                                    | Yes         | matches the current RustDesk ID                                             |
@@ -150,29 +150,16 @@ All paths are under `/api/admin`. "Yes" = present in `packages/api-contract/open
 | Book page                         | `GET /address-books/:guid`                                                                               | Yes         |                                                                             |
 | Sharing editor                    | `GET\|PUT /address-books/:guid/shares`                                                                   | Yes         | rules 1 read-only, 2 read/write, 3 full control                             |
 | Peers                             | `GET\|POST /address-books/:guid/peers`, `PATCH\|DELETE …/peers/:peerId`                                  | Yes         | 409 → field error; password write-only (`""` clears it)                     |
-| Peer tag filter                   | `GET …/peers?tag=`                                                                                       | Partly      | one tag only — see gap 2                                                    |
+| Peer tag filter                   | `GET …/peers?tag=a&tag=b&tagMode=any\|all`                                                               | Yes         | several tags in the URL (`tag` repeated); "Match" shown from two tags       |
 | Tags                              | `GET\|POST …/tags`, `PATCH\|DELETE …/tags/:name`                                                         | Yes         | `peerCount` shown before delete; recolor/rename optimistic                  |
 | Users                             | `GET\|POST /users`, `GET\|PATCH\|DELETE /users/:id`, `POST /users/:id/password`                          | Yes         | 409 `LAST_ADMIN` / `SELF_MODIFICATION` shown                                |
-| Tokens                            | `GET /users/:id/tokens`, `DELETE /tokens/:id`                                                            | Yes         | newest first (the API ignores `sort` here)                                  |
+| Tokens                            | `GET /users/:id/tokens`, `DELETE /tokens/:id`                                                            | Yes         | newest first; `current` marks your session, revoking it signs you out       |
 | Audit log                         | `GET /audit-events?kind&deviceId&sessionId&from&to&sort&page`                                            | Yes         | payload sheet uses the row already loaded (no single-event endpoint needed) |
 | About                             | `GET /system/info`                                                                                       | Yes         |                                                                             |
 
-### Gaps (features shown as reduced, never emulated over unbounded data)
-
-1. **Target hostname on sessions.** `SessionDto` has `deviceId`/`deviceUuid` but no hostname, so
-   session tables show the RustDesk ID linking to the device page.
-   Proposed: add `deviceHostname: string | null` to `SessionDto` (join on `devices.uuid`).
-2. **Multi-tag peer filter.** `GET …/peers` takes a single `tag`, so the filter is a single select
-   (the tag _assignment_ in the peer form is a multi-select).
-   Proposed: `GET /address-books/:guid/peers?tag=a&tag=b&tagMode=any|all` → `AdminPeerPageDto`.
-3. **Disconnect history.** Only the latest request per session is exposed.
-   Proposed: `GET /sessions/:id/disconnects` → `DisconnectDto[]`, newest first.
-4. **Connection type label.** The API returns the raw `connType` integer and no label; the panel
-   shows the integer and invents no mapping. Proposed: `connTypeLabel: string | null` in
-   `SessionDto` once the mapping is verified against the client.
-5. **"Current session" token.** Nothing marks the caller's own `ADMIN_WEB` token, so revoking an
-   admin token warns that it may be the current session.
-   Proposed: `current: boolean` on `TokenDto` (true for the token of the requesting cookie).
+Sessions carry `deviceHostname` (the target's current hostname, shown under its RustDesk ID) and
+`connTypeName` (the RustDesk client's connection type; a value the API does not know is shown as
+`Unknown (n)`).
 
 ---
 
@@ -186,7 +173,7 @@ results for these filters"), an inline error with Retry, and "No access" on 403.
 | `/login`                     | `auth/login`, `auth/me`                                     | API message on 401/403/429 (with `Retry-After`); "Session expired" after a forced sign-out; safe `redirect`                                                        |
 | `/` Dashboard                | `stats/summary`, `stats/timeseries`, `stats/top` ×2         | 24 h / 7 d / 30 d / custom range in the URL; hour buckets ≤ 48 h; KPI and top rows link to the filtered history; chart data as a table                             |
 | `/sessions/active`           | `sessions/active`, `system/info`, `sessions/:id/disconnect` | auto-refresh (5 s default, selectable, paused while hidden), "Updated n s ago", live elapsed time, "Unknown initiator", "No heartbeat", disconnect with live state |
-| `/sessions` (history)        | `sessions`, `sessions/:id`, `sessions/:id/disconnect`       | URL filters (debounced text), server sort and paging, `≈` durations, detail sheet `?session=<id>` with close reason, disconnect, raw events                        |
+| `/sessions` (history)        | `sessions`, `sessions/:id`, `sessions/:id/disconnect(s)`    | URL filters (debounced text), server sort and paging, `≈` durations, detail sheet `?session=<id>` with close reason, disconnect, raw events                        |
 | `/devices`, `/devices/:uuid` | `devices`, `devices/:uuid`, `sessions?deviceId=`            | search, online filter, copy RustDesk ID, system info JSON, ID changes, recent sessions                                                                             |
 | `/address-books`             | `address-books`, `users` (picker)                           | kind / owner / name filters, create shared book, rename, share, delete                                                                                             |
 | `/address-books/:guid`       | book, `peers`, `tags`, `shares`                             | tabs in the URL; peer CRUD with tag multi-select and write-only password; tag CRUD with color presets and peer counts; sharing editor                              |
@@ -220,9 +207,11 @@ browser uses** (`http://localhost:8080` for Docker, `http://localhost:5173` for 
 URL in production), or every sign-in and mutation fails the CSRF check with 403.
 
 nginx proxies all of `/api/`, so RustDesk clients can use the panel's public URL as their API
-server. Requests then reach the API from the nginx container: set the API's `TRUSTED_PROXIES` to
-that network (e.g. `uniquelocal`, or the Docker subnet) so client IPs, rate limits and
-`DEVICE_ALLOWED_CIDRS` see real addresses.
+server. Requests then reach the API from the nginx container, whose address docker compose fixes
+(`WEB_PROXY_IP`) and adds to the API's `TRUSTED_PROXIES`, so client IPs, rate limits and
+`DEVICE_ALLOWED_CIDRS` see real addresses. Outside compose, trust exactly the panel's address,
+never a whole private range: the API's own port is public and a direct caller could spoof
+`X-Forwarded-For`.
 
 Only same-origin deployment is supported: the session cookie is `SameSite=Strict`, so a panel on
 another origin than the API cannot sign in. Keep the API behind the panel's `/api/` proxy (or the
@@ -292,7 +281,8 @@ demand); the book it creates is deleted at the end.
 
 - **HTTPS** at the reverse proxy in front of the web container; nginx keeps an incoming
   `X-Forwarded-Proto`. The API's `ADMIN_COOKIE_SECURE=true` (the cookie is then HTTPS-only),
-  `ADMIN_ALLOWED_ORIGINS=https://<panel host>`, `TRUSTED_PROXIES` covering the proxies.
+  `ADMIN_ALLOWED_ORIGINS=https://<panel host>`, `TRUSTED_PROXIES` listing the proxy in front of
+  the panel (compose adds the panel itself).
 - **Headers** (set by nginx for the panel, not for `/api/`): CSP `default-src 'self'; script-src
 'self'` (no inline scripts — runtime config is the `/config.js` file), `style-src 'self'
 'unsafe-inline'` (Radix positioning and chart color variables are inline styles),

@@ -34,6 +34,7 @@ export type Session = Schema<'SessionDto'>;
 export type SessionDetail = Schema<'SessionDetailDto'>;
 export type SessionStatus = Schema<'SessionStatus'>;
 export type SessionCloseReason = Schema<'SessionCloseReason'>;
+export type ConnTypeName = Schema<'ConnTypeName'>;
 export type Disconnect = Schema<'DisconnectDto'>;
 export type DisconnectState = Schema<'DisconnectState'>;
 

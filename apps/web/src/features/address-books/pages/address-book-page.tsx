@@ -72,7 +72,7 @@ export function AddressBookPage() {
       />
       <Tabs
         value={state.tab}
-        onValueChange={(tab) => update({ tab, q: undefined, tag: undefined })}
+        onValueChange={(tab) => update({ tab, q: undefined, tag: undefined, tagMode: undefined })}
         className="gap-4"
       >
         <TabsList>

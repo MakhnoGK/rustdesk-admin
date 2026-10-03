@@ -3163,20 +3163,39 @@
             }
           },
           {
+            "name": "tag",
+            "required": false,
+            "in": "query",
+            "description": "Only peers carrying these tags (repeat the parameter: `tag=a&tag=b`); see `tagMode`.",
+            "schema": {
+              "maxItems": 50,
+              "minLength": 1,
+              "maxLength": 100,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "tagMode",
+            "required": false,
+            "in": "query",
+            "description": "`any` (default): peers with at least one of the tags; `all`: peers with every tag.",
+            "schema": {
+              "default": "any",
+              "type": "string",
+              "enum": [
+                "any",
+                "all"
+              ]
+            }
+          },
+          {
             "name": "search",
             "required": false,
             "in": "query",
             "description": "Matches RustDesk ID, alias, hostname, username or note.",
-            "schema": {
-              "maxLength": 100,
-              "type": "string"
-            }
-          },
-          {
-            "name": "tag",
-            "required": false,
-            "in": "query",
-            "description": "Only peers carrying this tag.",
             "schema": {
               "maxLength": 100,
               "type": "string"
@@ -4382,6 +4401,96 @@
           }
         ],
         "summary": "Delivery state of the latest disconnect request",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/sessions/{id}/disconnects": {
+      "get": {
+        "description": "At most 100 entries. Empty when nothing was requested.",
+        "operationId": "AdminSessions_disconnectHistory",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DisconnectDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in or session expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminErrorDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an administrator, or Origin not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminErrorDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminErrorDto"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "rd_admin_session": []
+          }
+        ],
+        "summary": "Every disconnect request of a session, newest first",
         "tags": [
           "admin"
         ]
@@ -6409,6 +6518,10 @@
           "active": {
             "type": "boolean",
             "description": "Neither revoked nor expired."
+          },
+          "current": {
+            "type": "boolean",
+            "description": "The token of the request that fetched this list (the caller's own admin session)."
           }
         },
         "required": [
@@ -6425,7 +6538,8 @@
           "lastUsedAt",
           "revokedAt",
           "revokedReason",
-          "active"
+          "active",
+          "current"
         ]
       },
       "TokenPageDto": {
@@ -7109,6 +7223,17 @@
           "UNKNOWN"
         ]
       },
+      "ConnTypeName": {
+        "type": "string",
+        "enum": [
+          "REMOTE_DESKTOP",
+          "FILE_TRANSFER",
+          "PORT_FORWARD",
+          "VIEW_CAMERA",
+          "TERMINAL"
+        ],
+        "description": "Name of connType as the RustDesk client assigns it (0 remote desktop, 1 file transfer, 2 port forward, 3 view camera, 4 terminal); null when connType is null or unknown"
+      },
       "SessionCloseReason": {
         "type": "string",
         "enum": [
@@ -7125,6 +7250,11 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "deviceHostname": {
+            "type": "string",
+            "nullable": true,
+            "description": "Current hostname of the target device; null when the device has not reported it"
           },
           "rustdeskSessionId": {
             "type": "string",
@@ -7148,6 +7278,15 @@
             "type": "number",
             "nullable": true,
             "description": "Raw connection type from the \"peer\" record"
+          },
+          "connTypeName": {
+            "nullable": true,
+            "description": "Name of connType as the RustDesk client assigns it (0 remote desktop, 1 file transfer, 2 port forward, 3 view camera, 4 terminal); null when connType is null or unknown",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConnTypeName"
+              }
+            ]
           },
           "startedAt": {
             "type": "string",
@@ -7218,11 +7357,13 @@
         },
         "required": [
           "id",
+          "deviceHostname",
           "rustdeskSessionId",
           "initiatorId",
           "initiatorName",
           "initiatorIp",
           "connType",
+          "connTypeName",
           "startedAt",
           "authenticatedAt",
           "closedAt",
@@ -7358,6 +7499,11 @@
             "type": "string",
             "format": "uuid"
           },
+          "deviceHostname": {
+            "type": "string",
+            "nullable": true,
+            "description": "Current hostname of the target device; null when the device has not reported it"
+          },
           "rustdeskSessionId": {
             "type": "string",
             "nullable": true,
@@ -7380,6 +7526,15 @@
             "type": "number",
             "nullable": true,
             "description": "Raw connection type from the \"peer\" record"
+          },
+          "connTypeName": {
+            "nullable": true,
+            "description": "Name of connType as the RustDesk client assigns it (0 remote desktop, 1 file transfer, 2 port forward, 3 view camera, 4 terminal); null when connType is null or unknown",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConnTypeName"
+              }
+            ]
           },
           "startedAt": {
             "type": "string",
@@ -7457,11 +7612,13 @@
         },
         "required": [
           "id",
+          "deviceHostname",
           "rustdeskSessionId",
           "initiatorId",
           "initiatorName",
           "initiatorIp",
           "connType",
+          "connTypeName",
           "startedAt",
           "authenticatedAt",
           "closedAt",

@@ -207,6 +207,9 @@ export class TokenDto {
 
   /** Neither revoked nor expired. */
   active!: boolean;
+
+  /** The token of the request that fetched this list (the caller's own admin session). */
+  current!: boolean;
 }
 
 export class TokenPageDto extends Paginated(TokenDto) {}

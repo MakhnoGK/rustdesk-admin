@@ -17,7 +17,7 @@ import {
 } from 'class-validator';
 import { Paginated, PageQueryDto } from '../../common/pagination/pagination';
 import { AddressBookKind } from '../../generated/prisma/enums';
-import { TrimToNull } from './validators';
+import { QueryArray, TrimToNull } from './validators';
 
 export class AddressBookDto {
   @ApiProperty({ format: 'uuid' })
@@ -163,11 +163,21 @@ export class PeerListQueryDto {
   @MaxLength(100)
   search?: string;
 
-  /** Only peers carrying this tag. */
+  /** Only peers carrying these tags (repeat the parameter: `tag=a&tag=b`); see `tagMode`. */
+  @ApiPropertyOptional({ type: [String], maxItems: 50 })
   @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  tag?: string;
+  @QueryArray()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  @Length(1, 100, { each: true })
+  tag?: string[];
+
+  /** `any` (default): peers with at least one of the tags; `all`: peers with every tag. */
+  @ApiPropertyOptional({ enum: ['any', 'all'], default: 'any' })
+  @IsOptional()
+  @IsIn(['any', 'all'])
+  tagMode: 'any' | 'all' = 'any';
 }
 
 class PeerWritableFields {

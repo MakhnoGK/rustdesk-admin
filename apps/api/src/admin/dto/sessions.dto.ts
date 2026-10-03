@@ -14,6 +14,7 @@ import {
 } from 'class-validator';
 import { Paginated, PageQueryDto } from '../../common/pagination/pagination';
 import { SessionCloseReason, SessionStatus } from '../../generated/prisma/enums';
+import { CONN_TYPE_NAMES, type ConnTypeName } from '../../sessions/conn-type';
 import { IsIsoDateTime, QueryBoolean } from './validators';
 
 export class SessionDto {
@@ -25,6 +26,13 @@ export class SessionDto {
 
   /** Target RustDesk ID. */
   deviceId!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Current hostname of the target device; null when the device has not reported it',
+  })
+  deviceHostname!: string | null;
 
   /** Conn ID on the target device. */
   connId!: number;
@@ -55,6 +63,16 @@ export class SessionDto {
     description: 'Raw connection type from the "peer" record',
   })
   connType!: number | null;
+
+  @ApiProperty({
+    enum: CONN_TYPE_NAMES,
+    enumName: 'ConnTypeName',
+    nullable: true,
+    description:
+      'Name of connType as the RustDesk client assigns it (0 remote desktop, 1 file transfer, 2 port forward, ' +
+      '3 view camera, 4 terminal); null when connType is null or unknown',
+  })
+  connTypeName!: ConnTypeName | null;
 
   authenticated!: boolean;
 

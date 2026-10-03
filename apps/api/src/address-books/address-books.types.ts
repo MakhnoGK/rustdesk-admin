@@ -61,5 +61,7 @@ export interface PeerListQuery {
   page: number;
   pageSize: number;
   search?: string;
-  tag?: string;
+  tags?: string[];
+  /** How `tags` combine; defaults to `any`. */
+  tagMode?: 'any' | 'all';
 }

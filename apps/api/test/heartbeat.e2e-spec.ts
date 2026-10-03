@@ -202,6 +202,73 @@ describe('Heartbeat, device registry and remote disconnect', () => {
       .set('Cookie', cookie)
       .expect(200);
     expect((state.body as { state: string }).state).toBe('EXPIRED');
+
+    // A new request is allowed after expiry; the history keeps both, newest first.
+    await request(t.http)
+      .post(`/api/admin/sessions/${session.id}/disconnect`)
+      .set('Origin', ORIGIN)
+      .set('Cookie', cookie)
+      .expect(201);
+    const history = await request(t.http)
+      .get(`/api/admin/sessions/${session.id}/disconnects`)
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(history.body).toMatchObject([
+      { state: 'REQUESTED', requestedBy: { username: 'root' } },
+      { state: 'EXPIRED' },
+    ]);
+  });
+
+  it('lists an empty disconnect history and 404s for an unknown session', async () => {
+    await createUser(t, 'root', { role: UserRole.ADMIN });
+    const cookie = await adminLogin(t, 'root');
+    await devicePost(t, '/api/audit/conn', conn(9, { action: 'new' })).expect(200);
+    const session = await t.prisma.session.findFirstOrThrow();
+    const empty = await request(t.http)
+      .get(`/api/admin/sessions/${session.id}/disconnects`)
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(empty.body).toEqual([]);
+    await request(t.http)
+      .get(`/api/admin/sessions/${randomUUID()}/disconnects`)
+      .set('Cookie', cookie)
+      .expect(404);
+  });
+
+  it('returns the target hostname and the connection type name with sessions', async () => {
+    await createUser(t, 'root', { role: UserRole.ADMIN });
+    const cookie = await adminLogin(t, 'root');
+    await devicePost(t, '/api/heartbeat', hb()).expect(200);
+    await devicePost(t, '/api/sysinfo', { ...DEVICE, hostname: 'desk-01' }).expect(200);
+    await devicePost(t, '/api/audit/conn', conn(4, { action: 'new' })).expect(200);
+    await devicePost(t, '/api/audit/conn', conn(4, { peer: ['111', 'Ann'], type: 1 })).expect(200);
+    await devicePost(t, '/api/audit/conn', conn(5, { peer: ['222', 'Ben'], type: 42 })).expect(200);
+
+    const active = await request(t.http)
+      .get('/api/admin/sessions/active')
+      .set('Cookie', cookie)
+      .expect(200);
+    const byConn = Object.fromEntries(
+      (active.body as { data: Array<{ connId: number }> }).data.map((s) => [s.connId, s]),
+    );
+    expect(byConn[4]).toMatchObject({
+      deviceHostname: 'desk-01',
+      connType: 1,
+      connTypeName: 'FILE_TRANSFER',
+    });
+    expect(byConn[5]).toMatchObject({ connType: 42, connTypeName: null });
+
+    // Sessions of a device that never sent sysinfo have no hostname.
+    await devicePost(t, '/api/audit/conn', {
+      ...conn(1, { action: 'new' }),
+      id: '555',
+      uuid: 'b3RoZXItdXVpZA==',
+    }).expect(200);
+    const other = await request(t.http)
+      .get('/api/admin/sessions?deviceId=555')
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(other.body).toMatchObject({ data: [{ deviceHostname: null, connTypeName: null }] });
   });
 
   it('rejects a heartbeat without uuid', async () => {

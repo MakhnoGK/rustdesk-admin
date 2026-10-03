@@ -78,9 +78,7 @@ export function SessionHistoryPage() {
         id: 'connType',
         header: 'Type',
         meta: { className: 'hidden xl:table-cell' },
-        cell: ({ row }) => (
-          <span className="tabular-nums">{connTypeLabel(row.original.connType)}</span>
-        ),
+        cell: ({ row }) => connTypeLabel(row.original),
       },
       {
         id: 'open',

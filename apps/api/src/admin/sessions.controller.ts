@@ -99,4 +99,15 @@ export class AdminSessionsController {
   async disconnectState(@Param('id', sessionId) id: string): Promise<DisconnectDto> {
     return toDisconnectDto(await this.disconnects.latest(id));
   }
+
+  @Get(':id/disconnects')
+  @ApiOperation({
+    summary: 'Every disconnect request of a session, newest first',
+    description: 'At most 100 entries. Empty when nothing was requested.',
+  })
+  @ApiOkResponse({ type: [DisconnectDto] })
+  @ApiNotFoundResponse({ type: AdminErrorDto })
+  async disconnectHistory(@Param('id', sessionId) id: string): Promise<DisconnectDto[]> {
+    return (await this.disconnects.history(id)).map(toDisconnectDto);
+  }
 }

@@ -852,6 +852,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/sessions/{id}/disconnects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every disconnect request of a session, newest first
+         * @description At most 100 entries. Empty when nothing was requested.
+         */
+        get: operations["AdminSessions_disconnectHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/stats/summary": {
         parameters: {
             query?: never;
@@ -1292,6 +1312,8 @@ export interface components {
             revokedReason: string | null;
             /** @description Neither revoked nor expired. */
             active: boolean;
+            /** @description The token of the request that fetched this list (the caller's own admin session). */
+            current: boolean;
         };
         TokenPageDto: {
             data: components["schemas"]["TokenDto"][];
@@ -1501,11 +1523,18 @@ export interface components {
         };
         /** @enum {string} */
         SessionStatus: "ACTIVE" | "CLOSED" | "TIMEOUT" | "UNKNOWN";
+        /**
+         * @description Name of connType as the RustDesk client assigns it (0 remote desktop, 1 file transfer, 2 port forward, 3 view camera, 4 terminal); null when connType is null or unknown
+         * @enum {string}
+         */
+        ConnTypeName: "REMOTE_DESKTOP" | "FILE_TRANSFER" | "PORT_FORWARD" | "VIEW_CAMERA" | "TERMINAL";
         /** @enum {string} */
         SessionCloseReason: "CLIENT_CLOSE" | "HEARTBEAT_RECONCILED" | "SUPERSEDED" | "TIMEOUT" | "ADMIN_DISCONNECT";
         SessionDto: {
             /** Format: uuid */
             id: string;
+            /** @description Current hostname of the target device; null when the device has not reported it */
+            deviceHostname: string | null;
             /** @description RustDesk session_id (u64, decimal string) */
             rustdeskSessionId: string | null;
             /** @description Initiator RustDesk ID (null until the "peer" record arrives) */
@@ -1514,6 +1543,8 @@ export interface components {
             initiatorIp: string | null;
             /** @description Raw connection type from the "peer" record */
             connType: number | null;
+            /** @description Name of connType as the RustDesk client assigns it (0 remote desktop, 1 file transfer, 2 port forward, 3 view camera, 4 terminal); null when connType is null or unknown */
+            connTypeName: components["schemas"]["ConnTypeName"] | null;
             /** Format: date-time */
             startedAt: string;
             /** Format: date-time */
@@ -1576,6 +1607,8 @@ export interface components {
         SessionDetailDto: {
             /** Format: uuid */
             id: string;
+            /** @description Current hostname of the target device; null when the device has not reported it */
+            deviceHostname: string | null;
             /** @description RustDesk session_id (u64, decimal string) */
             rustdeskSessionId: string | null;
             /** @description Initiator RustDesk ID (null until the "peer" record arrives) */
@@ -1584,6 +1617,8 @@ export interface components {
             initiatorIp: string | null;
             /** @description Raw connection type from the "peer" record */
             connType: number | null;
+            /** @description Name of connType as the RustDesk client assigns it (0 remote desktop, 1 file transfer, 2 port forward, 3 view camera, 4 terminal); null when connType is null or unknown */
+            connTypeName: components["schemas"]["ConnTypeName"] | null;
             /** Format: date-time */
             startedAt: string;
             /** Format: date-time */
@@ -3925,10 +3960,12 @@ export interface operations {
             query?: {
                 page?: number;
                 pageSize?: number;
+                /** @description Only peers carrying these tags (repeat the parameter: `tag=a&tag=b`); see `tagMode`. */
+                tag?: string[];
+                /** @description `any` (default): peers with at least one of the tags; `all`: peers with every tag. */
+                tagMode?: "any" | "all";
                 /** @description Matches RustDesk ID, alias, hostname, username or note. */
                 search?: string;
-                /** @description Only peers carrying this tag. */
-                tag?: string;
             };
             header?: never;
             path: {
@@ -4729,6 +4766,71 @@ export interface operations {
             };
             /** @description SESSION_NOT_ACTIVE */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminErrorDto"];
+                };
+            };
+            /** @description Validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminErrorDto"];
+                };
+            };
+            /** @description Rate limited */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminErrorDto"];
+                };
+            };
+        };
+    };
+    AdminSessions_disconnectHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisconnectDto"][];
+                };
+            };
+            /** @description Not signed in or session expired */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminErrorDto"];
+                };
+            };
+            /** @description Not an administrator, or Origin not allowed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminErrorDto"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

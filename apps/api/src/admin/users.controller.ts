@@ -116,11 +116,12 @@ export class AdminUsersController {
   async listTokens(
     @Param('id', userId) id: string,
     @Query() q: PageQueryDto,
+    @CurrentAuth() auth: AuthContext,
   ): Promise<TokenPageDto> {
     await this.users.get(id);
     const page = await this.tokens.listForUser(id, q);
     const now = new Date();
-    return { ...page, data: page.data.map((t) => toTokenDto(t, now)) };
+    return { ...page, data: page.data.map((t) => toTokenDto(t, auth.tokenId, now)) };
   }
 }
 

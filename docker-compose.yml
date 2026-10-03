@@ -10,6 +10,11 @@ x-api-env: &api-env
   env_file: .env
   environment:
     DATABASE_URL: postgresql://${POSTGRES_USER:-rustdesk}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-rustdesk}
+    # The web container's nginx is always a trusted proxy (so panel requests keep the client IP),
+    # plus whatever TRUSTED_PROXIES in .env adds (e.g. a TLS proxy in front of the stack). Only that
+    # one address is trusted: the API's own port 21114 is public, and trusting the whole private
+    # range would let a direct caller spoof X-Forwarded-For.
+    TRUSTED_PROXIES: ${WEB_PROXY_IP:-172.31.250.10}${TRUSTED_PROXIES:+,${TRUSTED_PROXIES}}
 
 services:
   db:
@@ -71,8 +76,19 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    networks:
+      default:
+        # Fixed, so the API can trust exactly this proxy (see TRUSTED_PROXIES above).
+        ipv4_address: ${WEB_PROXY_IP:-172.31.250.10}
     ports:
       - '8080:8080'
+
+networks:
+  default:
+    ipam:
+      config:
+        # Change DOCKER_SUBNET (and WEB_PROXY_IP inside it) if it overlaps a network on the host.
+        - subnet: ${DOCKER_SUBNET:-172.31.250.0/24}
 
 volumes:
   db-data:

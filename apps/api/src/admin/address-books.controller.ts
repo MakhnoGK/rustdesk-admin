@@ -167,7 +167,11 @@ export class AdminAddressBooksController {
     @Query() q: PeerListQueryDto,
   ): Promise<AdminPeerPageDto> {
     await this.books.get(guid);
-    const { total, data } = await this.peers.list(guid, q, { withSecrets: false });
+    const { total, data } = await this.peers.list(
+      guid,
+      { page: q.page, pageSize: q.pageSize, search: q.search, tags: q.tag, tagMode: q.tagMode },
+      { withSecrets: false },
+    );
     return toPage(data.map(toPeerDto), total, q);
   }
 

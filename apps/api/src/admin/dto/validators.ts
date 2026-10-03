@@ -23,6 +23,10 @@ export const QueryBoolean = () =>
     value === 'true' ? true : value === 'false' ? false : value,
   );
 
+/** A repeated query parameter arrives as an array, a single one as a string: always an array. */
+export const QueryArray = () =>
+  Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? [value] : value));
+
 /** Trims strings; empty becomes null (for nullable text fields). */
 export const TrimToNull = () =>
   Transform(({ value }: { value: unknown }) => {
