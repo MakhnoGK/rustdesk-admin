@@ -1,0 +1,22 @@
+{
+  "name": "@rustdesk-admin/eslint-config",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    "./node": "./node.js"
+  },
+  "files": [
+    "node.js"
+  ],
+  "dependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.13.0",
+    "typescript-eslint": "8.71.0"
+  },
+  "peerDependencies": {
+    "eslint": "^10.0.0"
+  }
+}

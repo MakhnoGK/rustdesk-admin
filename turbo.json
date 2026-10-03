@@ -1,0 +1,42 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "ui": "stream",
+  "globalPassThroughEnv": ["DOCKER_HOST", "TESTCONTAINERS_*"],
+  "tasks": {
+    "prisma:generate": {
+      "inputs": ["prisma/schema.prisma", "prisma.config.ts"],
+      "outputs": ["src/generated/**"]
+    },
+    "build": {
+      "dependsOn": ["^build", "^generate", "prisma:generate"],
+      "outputs": ["dist/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build", "prisma:generate"]
+    },
+    "lint": {
+      "dependsOn": ["prisma:generate"]
+    },
+    "test": {
+      "dependsOn": ["prisma:generate"],
+      "cache": false
+    },
+    "dev": {
+      "dependsOn": ["prisma:generate"],
+      "cache": false,
+      "persistent": true
+    },
+    "openapi:emit": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "generate": {
+      "outputs": []
+    },
+    "@rustdesk-admin/api-contract#generate": {
+      "dependsOn": ["@rustdesk-admin/api#openapi:emit"],
+      "inputs": ["openapi.json"],
+      "outputs": ["src/schema.d.ts"]
+    }
+  }
+}

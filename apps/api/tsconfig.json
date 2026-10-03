@@ -1,0 +1,9 @@
+{
+  "extends": "@rustdesk-admin/tsconfig/nest.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": ".",
+    "types": ["node", "jest"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "prisma/**/*.ts", "prisma.config.ts", "package.json"]
+}

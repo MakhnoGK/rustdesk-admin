@@ -1,0 +1,335 @@
+// Prisma schema for the RustDesk API server.
+//
+// Conventions:
+// - UUID primary keys everywhere; RustDesk IDs are plain indexed columns.
+// - snake_case tables and columns (raw SQL in the session projection and jobs stays readable).
+// - Every timestamp is timestamptz.
+// - Partial indexes Prisma cannot express live in the migration SQL (see the comments there).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum TokenKind {
+  RUSTDESK_CLIENT
+  ADMIN_WEB
+}
+
+enum AddressBookKind {
+  PERSONAL
+  SHARED
+}
+
+enum AuditKind {
+  CONN
+  FILE
+  ALARM
+}
+
+enum SessionStatus {
+  ACTIVE
+  CLOSED
+  TIMEOUT
+  UNKNOWN
+}
+
+enum SessionCloseReason {
+  CLIENT_CLOSE
+  HEARTBEAT_RECONCILED
+  SUPERSEDED
+  TIMEOUT
+  ADMIN_DISCONNECT
+}
+
+model User {
+  id           String     @id @default(uuid(7)) @db.Uuid
+  /// Lower-cased login name; unique.
+  username     String     @unique
+  displayName  String?    @map("display_name")
+  email        String?
+  note         String?
+  passwordHash String     @map("password_hash")
+  role         UserRole   @default(USER)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tokens             AuthToken[]
+  ownedBooks         AddressBook[]
+  shares             AddressBookShare[]
+  disconnectRequests PendingDisconnect[]
+
+  @@index([role, status])
+  @@map("users")
+}
+
+/// Every issued JWT (RustDesk client and admin web). `id` is the JWT `jti`.
+model AuthToken {
+  id            String    @id @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  kind          TokenKind
+  /// RustDesk ID of the client that logged in (RUSTDESK_CLIENT only).
+  clientId      String?   @map("client_id")
+  /// Machine UUID (base64) of the client that logged in (RUSTDESK_CLIENT only).
+  clientUuid    String?   @map("client_uuid")
+  deviceInfo    Json?     @map("device_info")
+  ip            String?
+  userAgent     String?   @map("user_agent")
+  issuedAt      DateTime  @map("issued_at") @db.Timestamptz(3)
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(3)
+  lastUsedAt    DateTime? @map("last_used_at") @db.Timestamptz(3)
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(3)
+  revokedReason String?   @map("revoked_reason")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, issuedAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("auth_tokens")
+}
+
+/// Server-wide key/value settings (e.g. the sysinfo version token).
+model ServerSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("server_settings")
+}
+
+/// A RustDesk device (the controlled side), keyed by its machine UUID.
+model Device {
+  id               String    @id @default(uuid(7)) @db.Uuid
+  /// Machine UUID (base64) as sent by the client; stable across RustDesk ID changes.
+  uuid             String    @unique
+  /// Current RustDesk ID.
+  rustdeskId       String    @map("rustdesk_id")
+  hostname         String?
+  username         String?
+  os               String?
+  /// Client version string from sysinfo (e.g. "1.4.2").
+  version          String?
+  /// Numeric version from heartbeats (`ver`).
+  heartbeatVersion BigInt?   @map("heartbeat_version")
+  sysinfo          Json?
+  sysinfoUpdatedAt DateTime? @map("sysinfo_updated_at") @db.Timestamptz(3)
+  lastHeartbeatAt  DateTime? @map("last_heartbeat_at") @db.Timestamptz(3)
+  lastIp           String?   @map("last_ip")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  idChanges DeviceIdChange[]
+
+  @@index([rustdeskId])
+  @@index([hostname])
+  @@index([lastHeartbeatAt(sort: Desc)])
+  @@map("devices")
+}
+
+/// History of RustDesk ID changes for one machine UUID.
+model DeviceIdChange {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  deviceId      String   @map("device_id") @db.Uuid
+  oldRustdeskId String   @map("old_rustdesk_id")
+  newRustdeskId String   @map("new_rustdesk_id")
+  changedAt     DateTime @map("changed_at") @db.Timestamptz(3)
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, changedAt(sort: Desc)])
+  @@map("device_id_changes")
+}
+
+model AddressBook {
+  /// The `guid` RustDesk clients use to address the book.
+  guid      String          @id @default(uuid(7)) @db.Uuid
+  name      String
+  /// Personal books: the user. Shared books: the creating administrator (nullable after deletion).
+  ownerId   String?         @map("owner_id") @db.Uuid
+  kind      AddressBookKind
+  note      String?
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  owner  User?              @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  shares AddressBookShare[]
+  peers  AbPeer[]
+  tags   AbTag[]
+
+  // One personal book per user: partial unique index in migration SQL.
+  @@index([ownerId])
+  @@index([kind, name])
+  @@map("address_books")
+}
+
+model AddressBookShare {
+  bookGuid  String   @map("book_guid") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  /// 1 read-only, 2 read/write, 3 full control (CHECK constraint in migration SQL).
+  rule      Int
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  book AddressBook @relation(fields: [bookGuid], references: [guid], onDelete: Cascade)
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([bookGuid, userId])
+  @@index([userId])
+  @@map("address_book_shares")
+}
+
+model AbPeer {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  bookGuid    String   @map("book_guid") @db.Uuid
+  /// RustDesk ID of the peer.
+  peerId      String   @map("peer_id")
+  alias       String   @default("")
+  note        String   @default("")
+  username    String   @default("")
+  hostname    String   @default("")
+  platform    String   @default("")
+  /// Encrypted saved-password hash (personal books). Envelope: v1:<keyId>:<iv>:<tag>:<ciphertext>.
+  hashEnc     String?  @map("hash_enc")
+  /// Encrypted shared password (shared books). Same envelope.
+  passwordEnc String?  @map("password_enc")
+  /// Remaining client fields (forceAlwaysRelay, rdpPort, rdpUsername, loginName, ...).
+  extra       Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  book AddressBook @relation(fields: [bookGuid], references: [guid], onDelete: Cascade)
+  tags AbPeerTag[]
+
+  @@unique([bookGuid, peerId])
+  @@map("ab_peers")
+}
+
+model AbTag {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  bookGuid  String   @map("book_guid") @db.Uuid
+  name      String
+  /// 32-bit ARGB color (unsigned, so it does not fit a signed int4).
+  color     BigInt
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  book  AddressBook @relation(fields: [bookGuid], references: [guid], onDelete: Cascade)
+  peers AbPeerTag[]
+
+  @@unique([bookGuid, name])
+  @@map("ab_tags")
+}
+
+model AbPeerTag {
+  peerId String @map("peer_id") @db.Uuid
+  tagId  String @map("tag_id") @db.Uuid
+
+  peer AbPeer @relation(fields: [peerId], references: [id], onDelete: Cascade)
+  tag  AbTag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([peerId, tagId])
+  @@index([tagId])
+  @@map("ab_peer_tags")
+}
+
+/// Append-only log of every record posted to /api/audit/{conn,file,alarm}.
+model AuditEvent {
+  id                String    @id @default(uuid(7)) @db.Uuid
+  kind              AuditKind
+  /// RustDesk ID of the posting (controlled) device.
+  deviceId          String?   @map("device_id")
+  deviceUuid        String?   @map("device_uuid")
+  connId            Int?      @map("conn_id")
+  rustdeskSessionId String?   @map("rustdesk_session_id")
+  /// conn records: new | peer | close; null for file/alarm and unrecognised records.
+  action            String?
+  sourceIp          String?   @map("source_ip")
+  receivedAt        DateTime  @map("received_at") @db.Timestamptz(3)
+  payload           Json
+  /// Client-generated per-record UUID; unique so retried posts are idempotent.
+  nonce             String?   @unique
+  /// For records without a nonce: sha256 of (uuid, conn_id, action, payload), deduplicated in a short window.
+  dedupHash         String?   @map("dedup_hash")
+  malformed         Boolean   @default(false)
+  sessionId         String?   @map("session_id") @db.Uuid
+
+  session Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([kind, receivedAt(sort: Desc)])
+  @@index([deviceId, receivedAt(sort: Desc)])
+  @@index([deviceUuid, connId])
+  @@index([sessionId])
+  @@index([receivedAt])
+  @@index([dedupHash, receivedAt])
+  @@map("audit_events")
+}
+
+/// Projection of one RustDesk connection, built from conn audit records and heartbeats.
+model Session {
+  id                String              @id @default(uuid(7)) @db.Uuid
+  /// Target (controlled) device machine UUID.
+  deviceUuid        String              @map("device_uuid")
+  /// Target RustDesk ID at the time of the connection.
+  deviceId          String              @map("device_id")
+  connId            Int                 @map("conn_id")
+  rustdeskSessionId String?             @map("rustdesk_session_id")
+  initiatorId       String?             @map("initiator_id")
+  initiatorName     String?             @map("initiator_name")
+  initiatorIp       String?             @map("initiator_ip")
+  connType          Int?                @map("conn_type")
+  authenticated     Boolean             @default(false)
+  startedAt         DateTime            @map("started_at") @db.Timestamptz(3)
+  authenticatedAt   DateTime?           @map("authenticated_at") @db.Timestamptz(3)
+  closedAt          DateTime?           @map("closed_at") @db.Timestamptz(3)
+  lastSeenAt        DateTime?           @map("last_seen_at") @db.Timestamptz(3)
+  durationSeconds   Int?                @map("duration_seconds")
+  durationEstimated Boolean             @default(false) @map("duration_estimated")
+  status            SessionStatus
+  closeReason       SessionCloseReason? @map("close_reason")
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  events      AuditEvent[]
+  disconnects PendingDisconnect[]
+
+  // Partial indexes (status = 'ACTIVE', unique (device_uuid, conn_id) where active) live in migration SQL.
+  @@index([deviceId, startedAt(sort: Desc)])
+  @@index([initiatorId, startedAt(sort: Desc)])
+  @@index([startedAt])
+  @@index([status, startedAt])
+  @@index([deviceUuid, connId, startedAt(sort: Desc)])
+  @@map("sessions")
+}
+
+/// An administrator's request to close a connection, delivered through the next heartbeat.
+model PendingDisconnect {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  deviceUuid    String    @map("device_uuid")
+  connId        Int       @map("conn_id")
+  sessionId     String    @map("session_id") @db.Uuid
+  requestedById String?   @map("requested_by_id") @db.Uuid
+  requestedAt   DateTime  @map("requested_at") @db.Timestamptz(3)
+  deliveredAt   DateTime? @map("delivered_at") @db.Timestamptz(3)
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(3)
+
+  session     Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  requestedBy User?   @relation(fields: [requestedById], references: [id], onDelete: SetNull)
+
+  @@index([deviceUuid, expiresAt])
+  @@index([sessionId, requestedAt(sort: Desc)])
+  @@map("pending_disconnects")
+}

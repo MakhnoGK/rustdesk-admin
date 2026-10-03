@@ -1,0 +1,26 @@
+{
+  "name": "@rustdesk-admin/api-contract",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenAPI document of @rustdesk-admin/api and the TypeScript types generated from it",
+  "license": "UNLICENSED",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./openapi.json": "./openapi.json"
+  },
+  "files": [
+    "openapi.json",
+    "src"
+  ],
+  "scripts": {
+    "generate": "openapi-typescript openapi.json -o src/schema.d.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check:clean": "git diff --exit-code -- openapi.json src/schema.d.ts"
+  },
+  "devDependencies": {
+    "@rustdesk-admin/tsconfig": "workspace:*",
+    "openapi-typescript": "7.13.0",
+    "typescript": "6.0.3"
+  }
+}

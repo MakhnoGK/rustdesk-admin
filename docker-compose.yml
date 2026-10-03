@@ -1,0 +1,71 @@
+# docker compose up -d
+#   db           PostgreSQL with a named volume
+#   api-migrate  one-shot: prisma migrate deploy + seed of the first administrator
+#   api          the RustDesk API server on port 21114
+#   web          reserved for the admin panel (apps/web, built separately)
+#
+# hbbs/hbbr (rustdesk-server) are NOT part of this stack; run them as usual.
+
+x-api-env: &api-env
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql://${POSTGRES_USER:-rustdesk}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-rustdesk}
+
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rustdesk}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-rustdesk}
+    volumes:
+      # PostgreSQL 18 images keep data under /var/lib/postgresql/<major>/docker.
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Uncomment to reach the database from the host (local development).
+    # ports:
+    #   - '127.0.0.1:5432:5432'
+
+  api-migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: migrate
+    <<: *api-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runner
+    image: rustdesk-admin-api:latest
+    <<: *api-env
+    restart: unless-stopped
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+    ports:
+      - '21114:21114'
+
+  # Reserved for the admin panel (apps/web). It is built from its own prompt; enable it once it exists.
+  # web:
+  #   build:
+  #     context: .
+  #     dockerfile: apps/web/Dockerfile
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - api
+  #   ports:
+  #     - '8080:8080'
+
+volumes:
+  db-data:

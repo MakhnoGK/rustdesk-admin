@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm format:check
+      # Integration tests start PostgreSQL with Testcontainers (Docker is available on the runner).
+      - run: pnpm test
+      - run: pnpm build
+      # The contract is committed: regenerating it must not change anything.
+      - run: pnpm openapi
+      - name: OpenAPI contract is up to date
+        run: git diff --exit-code -- packages/api-contract/openapi.json packages/api-contract/src/schema.d.ts
+      - name: Docker image builds
+        run: docker build -f apps/api/Dockerfile .
