@@ -37,6 +37,22 @@
       "dependsOn": ["@rustdesk-admin/api#openapi:emit"],
       "inputs": ["openapi.json"],
       "outputs": ["src/schema.d.ts"]
+    },
+    "@rustdesk-admin/web#build": {
+      "dependsOn": ["^generate", "^build"],
+      "env": ["VITE_*"],
+      "outputs": ["dist/**"]
+    },
+    "@rustdesk-admin/web#typecheck": {
+      "dependsOn": ["^generate", "^build"]
+    },
+    "@rustdesk-admin/web#test": {
+      "dependsOn": ["^generate", "^build"],
+      "cache": false
+    },
+    "test:e2e": {
+      "dependsOn": ["^generate", "^build"],
+      "cache": false
     }
   }
 }

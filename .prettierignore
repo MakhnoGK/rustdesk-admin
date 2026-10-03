@@ -6,3 +6,11 @@ packages/api-contract/openapi.json
 packages/api-contract/src/schema.d.ts
 apps/api/prisma/migrations
 docs/prompts
+
+# shadcn CLI output (apps/web): kept exactly as generated
+apps/web/src/components/ui
+apps/web/src/hooks/use-mobile.ts
+apps/web/src/styles/shadcn-tailwind.css
+# Playwright output
+apps/web/test-results
+apps/web/playwright-report

@@ -11,6 +11,8 @@ allowBuilds:
   '@scarf/scarf': false
   cpu-features: false
   esbuild: false
+  # msw's postinstall copies the browser worker; the tests use msw/node only.
+  msw: false
   protobufjs: false
   ssh2: false
   unrs-resolver: false

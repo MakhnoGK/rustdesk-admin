@@ -29,13 +29,13 @@ Contents: [Architecture](#architecture) · [RustDesk compatibility](#rustdesk-co
 rustdesk-admin/
 ├── apps/
 │   ├── api/                 NestJS API server (this README)
-│   └── web/                 admin panel — reserved, built separately (React + shadcn/ui)
+│   └── web/                 admin panel (React + shadcn/ui) — see apps/web/README.md
 ├── packages/
 │   ├── api-contract/        openapi.json emitted by apps/api + generated TS types (committed)
 │   ├── tsconfig/            shared tsconfig presets
 │   └── eslint-config/       shared ESLint flat config
 ├── scripts/                 init-env.sh, smoke.sh
-├── docker-compose.yml       db, api-migrate, api, (web, commented)
+├── docker-compose.yml       db, api-migrate, api, web
 └── turbo.json               api#openapi:emit → api-contract#generate → web#build
 ```
 
@@ -322,6 +322,24 @@ Both generated contract files are committed; CI fails when regenerating changes 
 
 ---
 
+## Admin panel (`apps/web`)
+
+A React + shadcn/ui SPA served by nginx on port **8080** (`docker compose up -d` starts it with the
+rest). nginx serves the panel and proxies all of `/api/` to the API, so panel and API share one
+origin — required by the `SameSite=Strict` session cookie. Sign in with the seeded administrator.
+
+- `ADMIN_ALLOWED_ORIGINS` must contain the URL the browser uses for the panel
+  (`http://localhost:8080` in Docker, `http://localhost:5173` for `pnpm --filter
+@rustdesk-admin/web dev`), or sign-in and every mutation fail the CSRF check.
+- Behind the panel's proxy the API sees the nginx container's address: set `TRUSTED_PROXIES`
+  (e.g. `uniquelocal`) so client IPs and rate limits stay per client.
+- Runtime settings of the web container: `API_UPSTREAM`, `APP_NAME`, `ACTIVE_SESSIONS_REFRESH_MS`.
+
+Architecture, contract matrix and gaps, screens, tests and the panel's production checklist:
+[`apps/web/README.md`](apps/web/README.md).
+
+---
+
 ## RustDesk client configuration
 
 In the client: **Settings → Network → ID/Relay server**.
@@ -424,7 +442,8 @@ firewall, or reverse-proxy allowlist of your client networks) wherever possible.
   everyone out. **AB key rotation**: new key in `AB_SECRET_KEY` with a new `AB_SECRET_KEY_ID`, old
   one in `AB_PREVIOUS_SECRET_KEYS=oldId:oldKey`, deploy, run `ab:rotate-key`, then remove the old key.
 - **Admin panel**: `ADMIN_ALLOWED_ORIGINS` = the panel's public URL; `ADMIN_COOKIE_SECURE=true`;
-  change the seeded administrator's password after first sign-in.
+  change the seeded administrator's password after first sign-in. Panel-side items (CSP, caching,
+  runtime config) are in [`apps/web/README.md`](apps/web/README.md#production-checklist).
 - **PostgreSQL**: automated backups (`pg_dump` or WAL archiving/PITR) with tested restores;
   monitor disk growth of `audit_events`.
 - **Migrations**: `prisma migrate deploy` only (the `api-migrate` service); never `migrate dev` in

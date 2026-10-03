@@ -2,7 +2,7 @@
 #   db           PostgreSQL with a named volume
 #   api-migrate  one-shot: prisma migrate deploy + seed of the first administrator
 #   api          the RustDesk API server on port 21114
-#   web          reserved for the admin panel (apps/web, built separately)
+#   web          the admin panel on port 8080 (nginx; proxies /api/ to the api service)
 #
 # hbbs/hbbr (rustdesk-server) are NOT part of this stack; run them as usual.
 
@@ -56,16 +56,23 @@ services:
     ports:
       - '21114:21114'
 
-  # Reserved for the admin panel (apps/web). It is built from its own prompt; enable it once it exists.
-  # web:
-  #   build:
-  #     context: .
-  #     dockerfile: apps/web/Dockerfile
-  #   restart: unless-stopped
-  #   depends_on:
-  #     - api
-  #   ports:
-  #     - '8080:8080'
+  # The admin panel: static files + /api/ reverse proxy to the API (http://localhost:8080).
+  # ADMIN_ALLOWED_ORIGINS in .env must contain the URL the browser uses for it.
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: rustdesk-admin-web:latest
+    restart: unless-stopped
+    environment:
+      API_UPSTREAM: http://api:21114
+      APP_NAME: ${APP_NAME:-}
+      ACTIVE_SESSIONS_REFRESH_MS: ${ACTIVE_SESSIONS_REFRESH_MS:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '8080:8080'
 
 volumes:
   db-data:
